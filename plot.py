@@ -1,35 +1,43 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from frank2d import Frank2D
-from frank2d import const
+from constants import rad_to_arcsec, deg_to_rad
 import time
 from matplotlib.colors import LogNorm
 
+
 class Plot():
-    def __init__(self, Frank2D):
+    def __init__(self, Frank2D, Geometry):
         self._frank2d = Frank2D
+        self._geometry = Geometry
         
-    def get_image(self, title = "Model", size = 7,  add_fourier_resolution = False, log_norm = False):
+    def get_image_intensity(self, title = "Model", fig_size = 7,  add_fourier_resolution = False, log_norm = False, deprojected = False):
         frank2d = self._frank2d
-        I = frank2d.sol_intensity
         Nx = frank2d._Nx
         Ny = frank2d._Ny
-        dx = frank2d._FT._dx*const.rad_to_arcsec
-        dy = frank2d._FT._dy*const.rad_to_arcsec
-        Rout = frank2d._Rmax*const.rad_to_arcsec
-        x = frank2d._FT._x*const.rad_to_arcsec
-        y = frank2d._FT._y*const.rad_to_arcsec
+        dx = frank2d._FT._dx*rad_to_arcsec
+        dy = frank2d._FT._dy*rad_to_arcsec
+        Rout = frank2d._Rmax*rad_to_arcsec
+        x = (frank2d._FT._Xn*rad_to_arcsec).reshape(Nx, Ny)
+        y = (frank2d._FT._Yn*rad_to_arcsec).reshape(Nx, Ny)
+        I = frank2d.sol_intensity.reshape(Nx, Ny)
 
+        if deprojected:
+            inc_r = self._geometry._inc*deg_to_rad
+            pa_r = self._geometry._pa*deg_to_rad
+
+            cos_i = np.cos(inc_r)
+            cos_pa, sin_pa = np.cos(pa_r), np.sin(pa_r)
+
+            x = (x * cos_pa + y * sin_pa) / cos_i
+            y = (x *-sin_pa + y * cos_pa)
+    
         # Coordenadas del pixel que quieres mostrar
         pixel_x, pixel_y = Nx//2, Ny//2
         pixel_value = I[pixel_y, pixel_x]
 
-        # Crear una figura con dos subplots
-        if add_fourier_resolution:
-            fig, axs = plt.subplots(1, 2, figsize=(10, 5), gridspec_kw={'width_ratios': [3, 1]})
-        else:
-            fig, ax = plt.subplots(1, 1, figsize=(size, size))
-            axs = [ax]
+
+        fig, ax = plt.subplots(1, 1, figsize=(fig_size, fig_size))
+        axs = [ax]
         
         norm = LogNorm() if log_norm else None
 
@@ -53,39 +61,8 @@ class Plot():
             bbox={'facecolor': 'white', 'pad': 4, 'alpha': 0.8}
         )
 
-        if add_fourier_resolution:
-            # Segundo subplot: el pixel específico
-            # Creamos una matriz de ceros y luego establecemos el valor del píxel deseado en I[pixel_y, pixel_x]
-            pixel_image = np.zeros((1, 1))
-            pixel_image[0, 0] = pixel_value
-            img = axs[1].imshow(pixel_image, cmap="magma", extent=[0, 1, 0, 1])
-            axs[1].set_title(f'Pixel at ({pixel_x}, {pixel_y})')
-            axs[1].set_xticks([])
-            axs[1].set_yticks([])
 
-            # Colorbar para el pixel específico
-            cmap_pixel = plt.colorbar(img, ax=axs[1], shrink=0.5)
-            cmap_pixel.set_label(r'I [Jy $sr^{-1}$]', size=9)
-
-            # Configurar notación científica en la barra de color
-            cmap_pixel.formatter.set_powerlimits((-2, 2))  # Limitar la notación científica a potencias entre -3 y 3
-            cmap_pixel.update_ticks()
-
-            # Mostrar el valor del pixel como leyenda
-            axs[1].text(0.5, -0.3, f'Intensity: {pixel_value:.4}', ha='center', va='center', transform=axs[1].transAxes, fontsize=9, bbox={'facecolor': 'white', 'alpha': 0.8, 'pad': 3})
-
-            # Agregar indicaciones del largo del pixel en los ejes x y y
-            axs[1].annotate('', xy=(0, 0), xytext=(1, 0), arrowprops=dict(arrowstyle='<->', color='black'))
-            axs[1].text(0.5, -0.05, f'{dx: .5f} ["]', ha='center', va='top', transform=axs[1].transAxes)
-
-            axs[1].annotate('', xy=(0, 0), xytext=(0, 1), arrowprops=dict(arrowstyle='<->', color='black'))
-            axs[1].text(-0.05, 0.5, f'{dy: .5f}  ["]', ha='right', va='center', transform=axs[1].transAxes, rotation='vertical')
-
-            # Ajustar el tamaño de los subplots
-            plt.tight_layout()
-            plt.subplots_adjust(wspace=0.2)
-        
-        plt.gca().set_aspect('equal') 
+        plt.gca().set_aspect('equal')
 
         plt.show()
 

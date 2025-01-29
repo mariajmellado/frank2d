@@ -122,7 +122,7 @@ class Frank2D(object):
             execution_time = end_time - start_time
             print(f'  --> time = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
 
-        self.sol_intensity = np.transpose(I_model.real.reshape(self._Nx, self._Ny))
+        self.sol_intensity = I_model.real.reshape(self._Nx, self._Ny)
 
 
     def frank1d(self, u, v, Vis, Weights, alpha = 1.3, w_smooth = 1e-1, n_pts = 300):
@@ -133,7 +133,7 @@ class Frank2D(object):
         FF = FrankFitter(Rout, n_pts, geom, alpha = alpha, weights_smooth = w_smooth)
         sol = FF.fit(u, v, Vis, Weights)
 
-        Geometry_ = Geometry(inc, pa, dra, ddec, deproject = False)
+        Geometry_ = Geometry(inc, pa, dra, ddec)
         FT_ = FourierTransform2D(self._Rmax, self._Nx, Geometry_)
         Grid_ = Gridding(self._Nx, self._Rmax, FT_, Geometry_)
         u_gridded, v_gridded, _, _ = Grid_.run(u, v, Vis, Weights)
