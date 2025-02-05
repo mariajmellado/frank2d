@@ -3,7 +3,7 @@ import numpy as np
 import constants as const
 
 class Geometry(object):
-    def __init__(self, inc, pa, dra, ddec, deproject):
+    def __init__(self, inc, pa, dra, ddec, deproject = False):
         self._inc = inc
         self._pa = pa
         self._dra = dra
@@ -14,10 +14,7 @@ class Geometry(object):
         Vp = self.apply_phase_shift(u, v, V, inverse=True)
         up, vp, wp = self.deproject(u, v)
 
-        if use3D:
-            return up, vp, wp, Vp
-        else:
-            return up, vp, Vp
+        return up, vp, Vp
 
     def deproject(self, u, v, inverse=False):
         self._inc *= const.deg_to_rad

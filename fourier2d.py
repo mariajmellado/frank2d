@@ -25,11 +25,6 @@ class FourierTransform2D(object):
         self._u_shifted = np.fft.fftshift(self._u)
         self._v_shifted = np.fft.fftshift(self._v)
         
-        #if Geometry._deproject:
-        #    print("Deprojecting FT...")
-        #    self._u, self._v, _ = Geometry.deproject(self._u, self._v)
-        #    self._u_shifted, self._v_shifted, _ = Geometry.deproject(self._u_shifted, self._v_shifted)
-
         u_, v_ = np.meshgrid(self._u, self._v, indexing='ij') 
         # u_n.shape = N**2 X 1, so now, we have N**2 collocation points.
         u_n, v_n = u_.reshape(-1), v_.reshape(-1)

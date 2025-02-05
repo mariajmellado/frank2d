@@ -14,8 +14,8 @@ class Gridding(object):
         u_, v_, Vis_ = u, v, Vis
 
         if self._Geometry._deproject:
-            print("Deprojecting...")    
-            u_, v_, Vis_ = self._Geometry.apply_correction(u, v, Vis)
+            print("Deprojecting...")
+            u_, v_, _ = self._Geometry.deproject(u, v)
         
         # Calculating bin edges.
         bin_centers = self.edges_centers(self._FT._u_shifted)[0]

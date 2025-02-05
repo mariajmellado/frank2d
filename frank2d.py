@@ -35,6 +35,7 @@ class Frank2D(object):
         self.sol_visibility = None
         self.sol_intensity = None
 
+    """ Setters """
     def set_kernel(self, type_kernel, kernel_params):
         print("Setting kernel: " + type_kernel + '...')
         if type_kernel == 'SquareExponential':
@@ -66,6 +67,7 @@ class Frank2D(object):
         self._gridded_data = {"u": u, "v": v, "vis": Vis, "weights": Weights}
         self._set_gridded_data = True
 
+    """ Getters """
     def preprocess_vis(self, u, v, Vis, Weights, hermitian = True, vis_component = "all"):
         if not self._set_gridded_data:
             start_time = time.time()
@@ -129,15 +131,19 @@ class Frank2D(object):
         geom = self._Geometry
         inc, pa, dra, ddec = geom._inc, geom._pa, geom._dra, geom._ddec
         Rout = self._Rmax*const.rad_to_arcsec
-        geom = SourceGeometry(inc= inc, PA= pa, dRA= dra, dDec= ddec)
-        FF = FrankFitter(Rout, n_pts, geom, alpha = alpha, weights_smooth = w_smooth)
+        geom_f1d = SourceGeometry(inc= inc, PA= pa, dRA= dra, dDec= ddec)
+        FF = FrankFitter(Rout, n_pts, geom_f1d, alpha = alpha, weights_smooth = w_smooth)
         sol = FF.fit(u, v, Vis, Weights)
+        u_gridded, v_gridded = None, None
 
-        Geometry_ = Geometry(inc, pa, dra, ddec, deproject = False)
-        FT_ = FourierTransform2D(self._Rmax, self._Nx, Geometry_)
-        Grid_ = Gridding(self._Nx, self._Rmax, FT_, Geometry_)
-        u_gridded, v_gridded, _, _ = Grid_.run(u, v, Vis, Weights)
+        if geom._deproject: # Frank1D needs deprojected Vis.
+            Geometry_ = Geometry(inc, pa, dra, ddec, deproject = False)
+            FT_ = FourierTransform2D(self._Rmax, self._Nx, Geometry_)
+            Grid_ = Gridding(self._Nx, self._Rmax, FT_, Geometry_)
+            u_gridded, v_gridded, _, _ = Grid_.run(u, v, Vis, Weights)
+        else:
+            u_gridded, v_gridded = self._gridded_data["u"], self._gridded_data["v"]
 
-        u, v, = u_gridded, v_gridded
-        vis_fit_1d = sol.predict(u, v, sol.mean, geometry = geom)
+        u, v = u_gridded, v_gridded
+        vis_fit_1d = sol.predict(u, v, sol.mean, geometry = geom_f1d)
         self._frank1d_guess = vis_fit_1d
