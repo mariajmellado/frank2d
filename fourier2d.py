@@ -34,7 +34,7 @@ class FourierTransform2D(object):
         self._Un = u_n
         self._Vn = v_n
 
-    def get_collocation_points(self):        
+    def get_collocation_points(self):
         return np.array([self._Xn, self._Yn]), np.array([self._Un, self._Vn])
 
     def coefficients(self, u = None, v = None, x = None, y = None, direction="forward"):

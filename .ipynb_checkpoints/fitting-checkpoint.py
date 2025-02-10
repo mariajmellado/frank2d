@@ -416,7 +416,7 @@ class IterativeSolverMethod():
 
     def linear_op_A_precond(self):
         def diag_SWI(vis_model):
-            return np.array([
+            return np.array([ 
                     ((self._kernel_row(i)[i] * self._Weights[i] + 1)**(-1) * vis_model[i])
                     for i in range(self._N2)
                     ])
@@ -487,7 +487,7 @@ class IterativeSolverMethod():
         def dot_product(x):
             return A.dot(x)
 
-        return LinearOperator((self._N2, self._N2), matvec=dot_product)
+        return LinearOperator((self._N2, self._N2), matvec=dot_product)    
 
 
     def solve(self):
