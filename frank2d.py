@@ -147,3 +147,4 @@ class Frank2D(object):
         u, v = u_gridded, v_gridded
         vis_fit_1d = sol.predict(u, v, sol.mean, geometry = geom_f1d)
         self._frank1d_guess = vis_fit_1d
+        return sol

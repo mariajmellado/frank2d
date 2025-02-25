@@ -36,7 +36,7 @@ class Plot():
         plot = plt.pcolormesh(y.reshape(Nx, Ny), x.reshape(Nx, Ny), I.reshape(Nx, Ny),
                               cmap='magma', vmin=0, vmax=4e10)
         plt.gca().invert_xaxis()
-        cmap = plt.colorbar(plot)
+        cmap = plt.colorbar(plot, shrink=0.8)
         cmap.set_label(r'I [Jy $sr^{-1}$]', size=15)
 
         plt.title(title)
@@ -66,14 +66,14 @@ class Plot():
 
     def visibility_model(self, title="Frank2D visibility model", deproject = False, fig_size = 7):
             frank2d = self._frank2d
-            vis_model = frank2d.sol_visibility.reshape(N, N)
+            Nx, Ny = self._Nx, self._Ny
+
+            vis_model = frank2d.sol_visibility.reshape(Nx, Ny)
             
             u, v = frank2d._FT._Un, frank2d._FT._Vn
 
-            Nx, Ny = self._Nx, self._Ny
-
             u_shifted, v_shifted = np.fft.fftshift(u.reshape(Nx, Ny)), np.fft.fftshift(v.reshape(Nx, Ny))
-            vis_shifted = np.fft.fftshift(vis_sol)
+            vis_shifted = np.fft.fftshift(vis_model)
 
             if deproject: 
                 u_shifted, v_shifted, _ = self._Geometry.deproject(u_shifted.flatten(), v_shifted.flatten())
@@ -82,7 +82,7 @@ class Plot():
             plt.xlabel(r'u [ $\lambda$]')
             plt.ylabel(r'v [ $\lambda$]')
             plt.gca().set_aspect('equal') 
-            cmap = plt.colorbar()
+            cmap = plt.colorbar(shrink=0.8)
             cmap.set_label(r'V [Jy]', size=15)
             plt.title(r'log|$Vis_{model}$|')
             plt.show()
