@@ -87,8 +87,7 @@ class Gridding(object):
                 w_xy = wts[y, x]
                 w_neg_xy = wts[y_sym, x_sym]
 
-                # Aplicamos hermiticidad si hay al menos un peso válido
-                if w_xy > 0 or w_neg_xy > 0:
+                if w_xy > 0 or w_neg_xy > 0:    
                     w_tot = w_xy + w_neg_xy
                     if w_tot > 0:
                         val = (np.conj(v_neg_xy) * w_neg_xy + v_xy * w_xy) / w_tot
