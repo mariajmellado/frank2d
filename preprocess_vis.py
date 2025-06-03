@@ -70,31 +70,36 @@ class Gridding(object):
         return u_gridded, v_gridded, vis_gridded, weights_gridded
 
     def enforce_hermitian_symmetry(self, vis, wts):
+        vis = np.fft.fftshift(vis)
+        wts = np.fft.fftshift(wts)
         nx, ny = vis.shape
-        cx, cy = nx // 2, ny // 2
-    
-        for x in range(cx, nx):  # Iterate over the right half
+        cx, cy = (nx // 2), (ny // 2)
+
+        print("Enforcing Hermitian symmetry...")
+        for x in range(nx):  
             for y in range(ny):
-                x_sym = (2 * cx - x) % nx
-                y_sym = (2 * cy - y) % ny
-    
-                # Current values
+                x_sym = (-x) % nx
+                y_sym = (-y) % ny
+
                 v_xy = vis[y, x]
                 v_neg_xy = vis[y_sym, x_sym]
-                
-                # Check if values are not Hermitian symmetric
-                if not np.isclose(v_neg_xy.real, v_xy.real):
-                    w_xy = wts[y, x]
-                    w_neg_xy = wts[y_sym, x_sym]
+
+                w_xy = wts[y, x]
+                w_neg_xy = wts[y_sym, x_sym]
+
+                # Aplicamos hermiticidad si hay al menos un peso válido
+                if w_xy > 0 or w_neg_xy > 0:
                     w_tot = w_xy + w_neg_xy
-    
-                    # Avoid division by zero
                     if w_tot > 0:
                         val = (np.conj(v_neg_xy) * w_neg_xy + v_xy * w_xy) / w_tot
                         vis[y, x] = val
                         vis[y_sym, x_sym] = np.conj(val)
-                        wts[y, y] = w_tot
+
+                        wts[y, x] = w_tot
                         wts[y_sym, x_sym] = w_tot
+
+        vis = np.fft.ifftshift(vis)
+        wts = np.fft.ifftshift(wts)
         return vis, wts
 
     def shiftting(self, freqs, vis_matrix, weights_matrix):
