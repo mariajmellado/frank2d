@@ -1,4 +1,4 @@
-import constants as const
+from constants import rad_to_arcsec, deg_to_rad
 from fourier2d import FourierTransform2D
 from geometry import Geometry
 from preprocess_vis import Gridding
@@ -18,7 +18,7 @@ class Frank2D(object):
     def __init__(self, N, Rmax, geom):
         self._Nx = self._Ny =  N
         self._N2 = self._Nx*self._Ny
-        self._Rmax = Rmax/const.rad_to_arcsec
+        self._Rmax = Rmax/rad_to_arcsec
         self._Geometry = geom
         self._FT = FourierTransform2D(self._Rmax, self._Nx, self._Geometry)
 
@@ -124,16 +124,17 @@ class Frank2D(object):
             execution_time = end_time - start_time
             print(f'  --> time = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
 
-        self.sol_intensity = np.transpose(I_model.real.reshape(self._Nx, self._Ny))
+        self.sol_intensity = I_model.real.reshape(self._Nx, self._Ny)
 
-
-    def frank1d(self, u, v, Vis, Weights, alpha = 1.3, w_smooth = 1e-1, n_pts = 300):
+    def frank1d(self, u, v, Vis, Weights, alpha = 1.3, w_smooth = 1e-3, n_pts = 300):
         geom = self._Geometry
         inc, pa, dra, ddec = geom._inc, geom._pa, geom._dra, geom._ddec
-        Rout = self._Rmax*const.rad_to_arcsec
+        Rout = self._Rmax*rad_to_arcsec
         geom_f1d = SourceGeometry(inc= inc, PA= pa, dRA= dra, dDec= ddec)
         FF = FrankFitter(Rout, n_pts, geom_f1d, alpha = alpha, weights_smooth = w_smooth)
         sol = FF.fit(u, v, Vis, Weights)
+
+        """
         u_gridded, v_gridded = None, None
 
         if geom._deproject: # Frank1D needs deprojected Vis.
@@ -147,4 +148,5 @@ class Frank2D(object):
         u, v = u_gridded, v_gridded
         vis_fit_1d = sol.predict(u, v, sol.mean, geometry = geom_f1d)
         self._frank1d_guess = vis_fit_1d
+        """
         return sol

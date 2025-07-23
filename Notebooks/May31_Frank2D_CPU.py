@@ -1,7 +1,16 @@
-# Frank2D CPU:
-#This algorithm uses gridded data from gridding the UVTABLE data, to optimize the calculation of the visibilities solution through Frankenstein scheme. 
+#!/usr/bin/env python
+# coding: utf-8
 
-#Imports.
+# ## Frank2D CPU 
+# ### Description
+# This algorithm uses gridded data from gridding the UVTABLE data, to optimize the calculation of the visibilities solution through Frankenstein scheme. 
+
+# 
+# #### Imports 
+
+# In[1]:
+
+
 import os
 import sys
 import numpy as np
@@ -29,7 +38,14 @@ from fitting import IterativeSolverMethod
 from preprocess_vis import Gridding
 from geometry import Geometry
 
-# Functions.
+
+# #### Functions
+
+# #### BICGM
+# 
+
+# In[2]:
+
 
 def _get_atol_rtol(name, b_norm, atol=0., rtol=1e-5):
     """
@@ -47,6 +63,10 @@ def _get_atol_rtol(name, b_norm, atol=0., rtol=1e-5):
     
     return atol, rtol
 
+
+# In[3]:
+
+
 def bicgstab(A, b, x0=None, *, rtol=1e-7, atol=0., maxiter=None, M=None, callback=None):
         print("     * BICGSTAB")
         A, M, x, b, postprocess = make_system(A, M, x0, b)
@@ -62,7 +82,7 @@ def bicgstab(A, b, x0=None, *, rtol=1e-7, atol=0., maxiter=None, M=None, callbac
         dotprod = np.vdot if np.iscomplexobj(x) else np.dot
 
         if maxiter is None:
-            maxiter = n*10
+            maxiter = 20000
         print("         * maxiter: ", maxiter)
 
         matvec = A.matvec
@@ -131,11 +151,21 @@ def bicgstab(A, b, x0=None, *, rtol=1e-7, atol=0., maxiter=None, M=None, callbac
             # Return incomplete progress
             return postprocess(x), maxiter
 
+
+# ####  Functions for optimization
+
+# In[4]:
+
+
 def linear_operator(A, size):
     def dot_product(x):
         return A.dot(x)
 
     return LinearOperator(size, matvec=dot_product)
+
+
+# In[5]:
+
 
 def P_k(r, k):
     if k == 0:
@@ -146,8 +176,15 @@ def P_k(r, k):
         return (35/3)*r**2 +6*r + 1  # P_2(r) = 35r^2 + 18r + 3
     else:
         raise ValueError("k must be 0, 1, or 2.")
-        
-def kernel_row(u, v, i, min_freq, u2 = None, v2 = None, m = -0.33, c = -0.1, l = 1e5):
+
+
+# In[6]:
+
+
+def kernel_row(u, v, i, min_freq, kernel_params, u2 = None, v2 = None):
+    m = kernel_params['m']
+    c = kernel_params['c']
+    l = kernel_params['l']
     def power_spectrum(q, m, c):
         if not np.isscalar(q):  
             q[q == 0] = min_freq
@@ -182,7 +219,11 @@ def kernel_row(u, v, i, min_freq, u2 = None, v2 = None, m = -0.33, c = -0.1, l =
 
     return amp * factor * P_k(r_normalized, k)
 
-def create_sparse_kernel(kernel_function, u, v, min_freq, u2 = None, v2 = None ):
+
+# In[7]:
+
+
+def create_sparse_kernel(kernel_function, u, v, min_freq, kernel_params, u2 = None, v2 = None ):
     data = []
     indices = []
     indptr = [0]
@@ -195,12 +236,9 @@ def create_sparse_kernel(kernel_function, u, v, min_freq, u2 = None, v2 = None )
         size1 = size2 = len(u)
 
     for i in range(size1):
-        if isinstance(u2, np.ndarray):  
-            row = kernel_function(u, v, i, min_freq, u2 = u2, v2 = v2)
-        else:
-            row = kernel_function(u, v, i, min_freq)
+        row = kernel_function(u, v, i, min_freq, kernel_params, u2 = u2, v2 = v2) if isinstance(u2, np.ndarray) else kernel_function(u, v, i, min_freq, kernel_params)
+            
         non_zero_indices = np.nonzero(row)[0]
-    
         kernel_values = row[non_zero_indices]
         
         data.extend(kernel_values)
@@ -212,14 +250,16 @@ def create_sparse_kernel(kernel_function, u, v, min_freq, u2 = None, v2 = None )
     indptr = np.array(indptr)
 
     size = (size1, size2)
-
     kernel_csr = csr_matrix((data, indices, indptr), shape=size)
-
     kernel = linear_operator(kernel_csr, size)
 
     return kernel
 
-def create_sparse_system_data(u_gridded_data, v_gridded_data, vis_gridded_data, weights_gridded_data, min_freq):
+
+# In[8]:
+
+
+def create_sparse_system_data(u_gridded_data, v_gridded_data, vis_gridded_data, weights_gridded_data, min_freq, kernel_params):
     N_data = vis_gridded_data.shape[0]
     
     data_A = []
@@ -229,15 +269,10 @@ def create_sparse_system_data(u_gridded_data, v_gridded_data, vis_gridded_data, 
     data_Aprecond = []
     indices_Aprecond = []
     indptr_Aprecond = [0]
-
-    data_b = []
-    indices_b = []
-    indptr_b = [0]
     
     for i in range(N_data):  
-        row = kernel_row(u_gridded_data, v_gridded_data, i, min_freq)
+        row = kernel_row(u_gridded_data, v_gridded_data, i, min_freq, kernel_params)
         non_zero_indices = np.nonzero(row)[0]
-        
         non_zero_values = row[non_zero_indices]
         Nm1_S_values = non_zero_values * weights_gridded_data[i]
 
@@ -272,9 +307,15 @@ def create_sparse_system_data(u_gridded_data, v_gridded_data, vis_gridded_data, 
 
     return A, A_precond, b
 
-###########################################################################################################
 
-def Frank2D_optimized(N, u_gridded, v_gridded, vis_gridded, weights_gridded, plot = True):
+# ### Frank2D CPU
+
+# **Params for algorithm: N, u_gridded, v_gridded, Visibilities_gridded, Weights_gridded**
+
+# In[9]:
+
+
+def Frank2D_optimized(N, u_gridded, v_gridded, vis_gridded, weights_gridded, maxiter = 100000, kernel_params = {'m': -0.3, 'c': -0.1 , 'l': 1e4}):
     input = weights_gridded.reshape(N, N)
     data_index = np.argwhere(input.flatten() != 0)
     no_data_index = np.argwhere(input.flatten() == 0) 
@@ -296,8 +337,9 @@ def Frank2D_optimized(N, u_gridded, v_gridded, vis_gridded, weights_gridded, plo
 
     print("------> Creating linear operators")
     start_time = time.time()
-    S11_linearOp = create_sparse_kernel(kernel_row, u_gridded_data, v_gridded_data, min_freq)
-    S12_T_linearOp = create_sparse_kernel(kernel_row, u_gridded_data, v_gridded_data, min_freq, u2 = u_gridded_no_data, v2 = v_gridded_no_data)
+    S11_linearOp = create_sparse_kernel(kernel_row, u_gridded_data, v_gridded_data, min_freq, kernel_params)
+    S12_T_linearOp = create_sparse_kernel(kernel_row, u_gridded_data, v_gridded_data, min_freq, kernel_params,
+                                          u2 = u_gridded_no_data, v2 = v_gridded_no_data)
     end_time = time.time()
     execution_time = end_time - start_time
     print(f'  --> time = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
@@ -305,7 +347,7 @@ def Frank2D_optimized(N, u_gridded, v_gridded, vis_gridded, weights_gridded, plo
 
     print("------> Creating sparse system")
     start_time = time.time()
-    params = [u_gridded_data, v_gridded_data, vis_gridded_data, weights_gridded_data, min_freq]
+    params = [u_gridded_data, v_gridded_data, vis_gridded_data, weights_gridded_data, min_freq, kernel_params]
     A_opt, A_precond_opt, b_opt = create_sparse_system_data(*params)
     end_time = time.time()
     execution_time = end_time - start_time
@@ -314,7 +356,7 @@ def Frank2D_optimized(N, u_gridded, v_gridded, vis_gridded, weights_gridded, plo
 
     print("------> Running CGM")
     start_time = time.time()
-    x_data, info = bicgstab(A_opt, b_opt, M = A_precond_opt, rtol = 1e-9)
+    x_data, info = bicgstab(A_opt, b_opt, M = A_precond_opt, rtol = 1e-9, maxiter=maxiter)
     C_ = x_data
     end_time = time.time()
     execution_time = end_time - start_time
@@ -353,17 +395,5 @@ def Frank2D_optimized(N, u_gridded, v_gridded, vis_gridded, weights_gridded, plo
         return V_m
 
     V_m_2 = recovering_sol(C_)
+    return V_m_2
 
-    if plot:
-        plt.pcolormesh(np.fft.fftshift(v_gridded.reshape(N, N)),
-               np.fft.fftshift(u_gridded).reshape(N,N),
-               np.log(np.abs(np.fft.fftshift(V_m_2))), cmap="viridis", vmin=-12, vmax=-2)
-        plt.xlabel(r'u [ $\lambda$]')
-        plt.ylabel(r'v [ $\lambda$]')
-        plt.gca().set_aspect('equal') 
-        cmap = plt.colorbar()
-        cmap.set_label(r'V [Jy]', size=15)
-        plt.title(r'log|$Vis_{model}$| optimized way')
-        plt.show()
-
-    

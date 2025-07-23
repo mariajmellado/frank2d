@@ -42,9 +42,8 @@ class Gridding(object):
     def weighted_gridding(self, u, v, Vis, Weights, centers, edges_u, edges_v, shift = False, hermitian = True):
         # Calculating values in grid
         vis_weights_sum_bin, _, _, _ = binned_statistic_2d(u, v, Vis*Weights, 'sum', bins=[edges_u, edges_v], expand_binnumbers = False)
-        weights_sum_bin, _, _, _ = binned_statistic_2d(u, v, Weights, 'sum', bins=[edges_u, edges_v], expand_binnumbers = False)
-        vis_gridded_matrix =  vis_weights_sum_bin/weights_sum_bin
         weights_gridded_matrix, _, _, _ = binned_statistic_2d(u, v, Weights, 'sum', bins=[edges_u, edges_v], expand_binnumbers = False)
+        vis_gridded_matrix =  vis_weights_sum_bin/weights_gridded_matrix
 
         # Change Nans by 0 in vis.
         vis_gridded = np.nan_to_num(vis_gridded_matrix, nan=0)
