@@ -15,7 +15,6 @@ class FourierTransform2D(object):
         x_, y_ = np.meshgrid(self._x, self._y, indexing='ij')
         # x_n.shape = N**2 X 1, so now, we have N**2 collocation points in the image plane.
         x_n, y_n = x_.reshape(-1), y_.reshape(-1)
-
         self._dx = 2*self._Xmax/self._Nx
         self._dy = 2*self._Ymax/self._Ny
 
@@ -33,6 +32,8 @@ class FourierTransform2D(object):
         self._Yn = y_n
         self._Un = u_n
         self._Vn = v_n
+        
+        self._in = True
 
     def get_collocation_points(self):
         return np.array([self._Xn, self._Yn]), np.array([self._Un, self._Vn])
@@ -61,7 +62,9 @@ class FourierTransform2D(object):
         else:
             raise AttributeError("direction must be one of {}"
                                  "".format(['forward', 'backward']))
+                     
         H = norm * np.exp(factor*(np.outer(u, X) + np.outer(v, Y)))
+
         return H
 
     def fast_transform(self, element, direction = 'forward'):
@@ -92,6 +95,11 @@ class FourierTransform2D(object):
     def q(self):
         """Frequency points"""
         return np.hypot(self._Un, self._Vn)
+
+    @property
+    def r(self):
+        """Image plane points"""
+        return np.hypot(self._Xn, self._Yn)
     
     @property
     def Rmax(self):

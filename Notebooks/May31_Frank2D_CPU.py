@@ -69,52 +69,65 @@ def _get_atol_rtol(name, b_norm, atol=0., rtol=1e-5):
 
 def bicgstab(A, b, x0=None, *, rtol=1e-7, atol=0., maxiter=None, M=None, callback=None):
         print("     * BICGSTAB")
-        A, M, x, b, postprocess = make_system(A, M, x0, b)
+        A, M, x, b = make_system(A, M, x0, b)
         bnrm2 = np.linalg.norm(b)
-
+    
         atol, _ = _get_atol_rtol('bicgstab', bnrm2, atol, rtol)
-
+    
+        print("....................... TOLERANCE: ", atol)
+    
         if bnrm2 == 0:
-            return postprocess(b), 0
-
+            return b, 0
+    
         n = len(b)
-
+    
         dotprod = np.vdot if np.iscomplexobj(x) else np.dot
-
+    
         if maxiter is None:
-            maxiter = 20000
-        print("         * maxiter: ", maxiter)
+            maxiter = 10
 
+        print("         * maxiter: ", maxiter)
+    
         matvec = A.matvec
         psolve = M.matvec
-
+    
         # These values make no sense but coming from original Fortran code
         # sqrt might have been meant instead.
         rhotol = np.finfo(x.dtype.char).eps**2
         omegatol = rhotol
-
+    
         # Dummy values to initialize vars, silence linter warnings
         rho_prev, omega, alpha, p, v = None, None, None, None, None
-
+    
         r = b - matvec(x) if x.any() else b.copy()
         rtilde = r.copy()
 
+        tols_array = []
+    
         for iteration in range(maxiter):
             print(".... iteration: ", iteration)
-            tol_ = np.linalg.norm(r) 
-            print("                        -> actual tol: ", str(tol_), "vs ", str(atol))
-            if tol_ < atol:  # Are we done?
-                print(" --------------------------------------> CGM converged in ", iteration, " iterations")
-                return postprocess(x), 0
+            act_tol = np.linalg.norm(r)
+            tols_array.append(act_tol)
+            print("                        -> actual tol: ", str(act_tol), "vs ", str(atol))
+            if act_tol < atol:  # Are we done?
+                print(" --------------------------------------> CGM converged in ", iteration, " iterations with tol ", act_tol)
 
+                iterations = np.arange(1, len(iteration) + 1)
+                tols_array = np.array(tols_array)
+                plt.figure(figsize = (3,5))
+                plt.plot(iterations, tols_array)
+                plt.show()
+                
+                return x, 0
+    
             rho = dotprod(rtilde, r)
             if np.abs(rho) < rhotol:  # rho breakdown
-                return postprocess(x), -10
-
+                return x, -10
+    
             if iteration > 0:
                 if np.abs(omega) < omegatol:  # omega breakdown
-                    return postprocess(x), -11
-
+                    return x, -11
+    
                 beta = (rho / rho_prev) * (alpha / omega)
                 p -= omega*v
                 p *= beta
@@ -122,20 +135,20 @@ def bicgstab(A, b, x0=None, *, rtol=1e-7, atol=0., maxiter=None, M=None, callbac
             else:  # First spin
                 s = np.empty_like(r)
                 p = r.copy()
-
+    
             phat = psolve(p)
             v = matvec(phat)
             rv = dotprod(rtilde, v)
             if rv == 0:
-                return postprocess(x), -11
+                return x, -11
             alpha = rho / rv
             r -= alpha*v
             s[:] = r[:]
-
+    
             if np.linalg.norm(s) < atol:
                 x += alpha*phat
-                return postprocess(x), 0
-
+                return x, 0
+    
             shat = psolve(s)
             t = matvec(shat)
             omega = dotprod(t, s) / dotprod(t, t)
@@ -143,13 +156,13 @@ def bicgstab(A, b, x0=None, *, rtol=1e-7, atol=0., maxiter=None, M=None, callbac
             x += omega*shat
             r -= omega*t
             rho_prev = rho
-
+    
             if callback:
                 callback(x)
-
+    
         else:  # for loop exhausted
             # Return incomplete progress
-            return postprocess(x), maxiter
+            return x, maxiter
 
 
 # ####  Functions for optimization
@@ -190,7 +203,7 @@ def kernel_row(u, v, i, min_freq, kernel_params, u2 = None, v2 = None):
             q[q == 0] = min_freq
         elif q == 0:
             q = min_freq
-        return (q**m)*np.exp(c)
+        return c*(q**m)
     
     j, k = 4, 1
     H = 2*1.897367*l
@@ -315,7 +328,9 @@ def create_sparse_system_data(u_gridded_data, v_gridded_data, vis_gridded_data, 
 # In[9]:
 
 
-def Frank2D_optimized(N, u_gridded, v_gridded, vis_gridded, weights_gridded, maxiter = 100000, kernel_params = {'m': -0.3, 'c': -0.1 , 'l': 1e4}):
+def Frank2D_optimized(N, u_gridded, v_gridded, vis_gridded, weights_gridded,
+                      maxiter = 100000, kernel_params = {'m': -2.5, 'c': 11.5 , 'l': 1e5}):
+    print("RUNNING WITH ", kernel_params )
     input = weights_gridded.reshape(N, N)
     data_index = np.argwhere(input.flatten() != 0)
     no_data_index = np.argwhere(input.flatten() == 0) 
