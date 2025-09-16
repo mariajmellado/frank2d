@@ -1,6 +1,6 @@
 
 import numpy as np
-import constants as const
+from .constants import rad_to_arcsec, deg_to_rad
 
 class Geometry(object):
     def __init__(self, inc, pa, dra, ddec, deproject = False):
@@ -17,8 +17,8 @@ class Geometry(object):
         return up, vp, Vp
 
     def deproject(self, u, v, inverse=False):
-        self._inc *= const.deg_to_rad
-        self._pa *= const.deg_to_rad
+        self._inc *= deg_to_rad
+        self._pa *= deg_to_rad
 
         cos_t = np.cos(self._pa)
         sin_t = np.sin(self._pa)
@@ -40,8 +40,8 @@ class Geometry(object):
             return up, vp, wp
 
     def apply_phase_shift(self, u, v, V, inverse=False):
-        self._dra *= 2. * np.pi / const.rad_to_arcsec
-        self._ddec *= 2. * np.pi / const.rad_to_arcsec
+        self._dra *= 2. * np.pi / rad_to_arcsec
+        self._ddec *= 2. * np.pi / rad_to_arcsec
 
         phi = u * self._dra + v * self._ddec
 

@@ -66,8 +66,24 @@ def _get_atol_rtol(name, b_norm, atol=0., rtol=1e-5):
 
 # In[3]:
 
+def plot_tolerance(iteration, tols):
+    iterations = np.arange(1, iteration + 2)
+    tols = np.array(tols)
 
-def bicgstab(A, b, x0=None, *, rtol=1e-7, atol=0., maxiter=None, M=None, callback=None):
+    plt.figure(figsize = (5,3))
+    plt.plot(iterations, tols)
+    plt.xlabel('iterations')
+    plt.ylabel('tolerance')
+    plt.show()
+
+    plt.figure(figsize = (5,3))
+    plt.plot(iterations, np.log(tols))
+    plt.xlabel('iterations')
+    plt.ylabel('log tolerance')
+    plt.show()
+    
+
+def bicgstab(A, b, x0=None, *, rtol=1e-7, atol=0., maxiter=20000, M=None, callback=None):
         print("     * BICGSTAB")
         A, M, x, b = make_system(A, M, x0, b)
         bnrm2 = np.linalg.norm(b)
@@ -82,9 +98,6 @@ def bicgstab(A, b, x0=None, *, rtol=1e-7, atol=0., maxiter=None, M=None, callbac
         n = len(b)
     
         dotprod = np.vdot if np.iscomplexobj(x) else np.dot
-    
-        if maxiter is None:
-            maxiter = 10
 
         print("         * maxiter: ", maxiter)
     
@@ -102,30 +115,29 @@ def bicgstab(A, b, x0=None, *, rtol=1e-7, atol=0., maxiter=None, M=None, callbac
         r = b - matvec(x) if x.any() else b.copy()
         rtilde = r.copy()
 
-        tols_array = []
+        tols = []
     
         for iteration in range(maxiter):
             print(".... iteration: ", iteration)
             act_tol = np.linalg.norm(r)
-            tols_array.append(act_tol)
+            tols.append(act_tol)
             print("                        -> actual tol: ", str(act_tol), "vs ", str(atol))
             if act_tol < atol:  # Are we done?
                 print(" --------------------------------------> CGM converged in ", iteration, " iterations with tol ", act_tol)
 
-                iterations = np.arange(1, len(iteration) + 1)
-                tols_array = np.array(tols_array)
-                plt.figure(figsize = (3,5))
-                plt.plot(iterations, tols_array)
-                plt.show()
+                plot_tolerance(iteration, tols)
                 
                 return x, 0
     
             rho = dotprod(rtilde, r)
             if np.abs(rho) < rhotol:  # rho breakdown
+                print("converged by norm of rho")
+                plot_tolerance(iteration, tols)
                 return x, -10
     
             if iteration > 0:
                 if np.abs(omega) < omegatol:  # omega breakdown
+                    print("converged by norm of omega")
                     return x, -11
     
                 beta = (rho / rho_prev) * (alpha / omega)
@@ -140,13 +152,17 @@ def bicgstab(A, b, x0=None, *, rtol=1e-7, atol=0., maxiter=None, M=None, callbac
             v = matvec(phat)
             rv = dotprod(rtilde, v)
             if rv == 0:
+                print("converged by rv = 0")
+                plot_tolerance(iteration, tols)
                 return x, -11
             alpha = rho / rv
             r -= alpha*v
             s[:] = r[:]
     
             if np.linalg.norm(s) < atol:
+                print("converged by norm of s")
                 x += alpha*phat
+                plot_tolerance(iteration, tols)
                 return x, 0
     
             shat = psolve(s)
@@ -162,6 +178,9 @@ def bicgstab(A, b, x0=None, *, rtol=1e-7, atol=0., maxiter=None, M=None, callbac
     
         else:  # for loop exhausted
             # Return incomplete progress
+
+            plot_tolerance(maxiter-1, tols)
+            
             return x, maxiter
 
 
@@ -198,6 +217,7 @@ def kernel_row(u, v, i, min_freq, kernel_params, u2 = None, v2 = None):
     m = kernel_params['m']
     c = kernel_params['c']
     l = kernel_params['l']
+    
     def power_spectrum(q, m, c):
         if not np.isscalar(q):  
             q[q == 0] = min_freq
@@ -329,8 +349,12 @@ def create_sparse_system_data(u_gridded_data, v_gridded_data, vis_gridded_data, 
 
 
 def Frank2D_optimized(N, u_gridded, v_gridded, vis_gridded, weights_gridded,
-                      maxiter = 100000, kernel_params = {'m': -2.5, 'c': 11.5 , 'l': 1e5}):
+                      maxiter = 50000, 
+                      kernel_params = {'m': -2, 'c': 1e8, 'l': 1e5},
+                      rtol = 1e-9, 
+                      x0 = None):
     print("RUNNING WITH ", kernel_params )
+    
     input = weights_gridded.reshape(N, N)
     data_index = np.argwhere(input.flatten() != 0)
     no_data_index = np.argwhere(input.flatten() == 0) 
@@ -340,6 +364,11 @@ def Frank2D_optimized(N, u_gridded, v_gridded, vis_gridded, weights_gridded,
     v_gridded_data = v_gridded[data_index].flatten()
     vis_gridded_data  = vis_gridded[data_index].flatten()
     weights_gridded_data = weights_gridded[data_index].flatten()
+    
+    if x0 != None:
+        x0_data = x0[data_index].flatten()
+    else: 
+        x0_data = None
 
     # no data or data with weights == 0.
     u_gridded_no_data = u_gridded[no_data_index].flatten()
@@ -371,7 +400,8 @@ def Frank2D_optimized(N, u_gridded, v_gridded, vis_gridded, weights_gridded,
 
     print("------> Running CGM")
     start_time = time.time()
-    x_data, info = bicgstab(A_opt, b_opt, M = A_precond_opt, rtol = 1e-9, maxiter=maxiter)
+    x_data, info = bicgstab(A_opt, b_opt, x0 = x0_data, M = A_precond_opt, rtol = rtol, maxiter=maxiter)
+    print("CGM with info: ", info)
     C_ = x_data
     end_time = time.time()
     execution_time = end_time - start_time

@@ -2,12 +2,17 @@ import numpy as np
 import time
 import logging
 import scipy
+from scipy.special import gamma
 
-from constants import rad_to_arcsec, deg_to_rad
-from fourier2d import FourierTransform2D
+from .constants import rad_to_arcsec, deg_to_rad
+from .fourier2d import FourierTransform2D
 
 import abc
 import matplotlib.pyplot as plt
+
+"""
+This module contain the approach for 
+"""
 
 class FrankRadialFit(metaclass=abc.ABCMeta):
     """
@@ -131,8 +136,6 @@ class FrankRadialFit(metaclass=abc.ABCMeta):
         """Fit quantities for reference"""
         return self._info
 
-
-
 class FrankGaussianFit(FrankRadialFit):
     """
     Result of a frank fit with a Gaussian brightness model.
@@ -162,7 +165,6 @@ class FrankGaussianFit(FrankRadialFit):
     def power_spectrum(self):
         """Power spectrum coefficients"""
         return self._fit.power_spectrum
-
 
 class FourierBesselFitter(object):
     """
@@ -672,10 +674,6 @@ class GaussianModel:
         self.Ykm_f_conj = self.Ykm_f.conj()
         self.Ykm_conj = self.Ykm.conj()
 
-        # Weights
-        weights = self._Wvalues.copy()
-        weights_regularized = weights + 1e-8  # Avoid division by zero.
-
         # Spatial frequencies and related.
         u1, u2 = np.meshgrid(self.u, self.u)
         v1, v2 = np.meshgrid(self.v, self.v)
@@ -686,20 +684,18 @@ class GaussianModel:
         self._min_freq = np.sort(np.abs(np.unique(self.v)))[1]
         self._max_freq = np.max(self._qs)
 
-        print("Minimum frequency in the data:", self._min_freq)
-        print("Maximum frequency in the data:", self._max_freq)
-
-
         # Wendland kernel parameters.
-        self.m , self.log_c = -2, 8
-        self.log_l = 6
+        self.m , self.logc = -2, 8
+        self.logl = 5
 
-        self.c = 10**self.log_c  # Convert log_c to c.
-        self.l = 10**self.log_l
+        self.c = 10**self.logc  # Convert logc to c.
+        self.l = 10**self.logl
         self._r = np.sqrt((u1-u2)**2 + (v1-v2)**2)
         self._j_W, self._k_W = 4, 1
 
         # Constants in the log probability of the posterior.
+        #weights = self._Wvalues.copy()
+        #weights_regularized = weights + 1e-8  # Avoid division by zero.
         #self._log_det_N = np.sum(np.log(1/weights_regularized))
         #self._VtNm1V = (np.conjugate(self._V).T @ (weights_regularized * self._V)).real
         #self._factor = np.log(2*np.pi)
@@ -712,20 +708,31 @@ class GaussianModel:
 
     def one_fit(self, param):
         """
-        Fit the model with the given parameters m, c, log_l.
+        Fit the model with the given parameters m, c, logl.
         """
         if param is not None:
-            self.m, self.log_c, self.log_l = param
-            self.c = 10**self.log_c  # Convert log_c to c.
-            self.l = 10**self.log_l
-        print("                 --------------> Fitting with m, c, log_l:", self.m, self.c, self.log_l)
+            self.m = param['m']
+            self.logc = param['logc']
+            self.logl = param['logl']
+            self.c = 10**self.logc
+            self.l = 10**self.logl
+
+        print("-> Fitting with m, logc, logl:", self.m, self.logc, self.logl)
+
         S_real = self.calculate_S_real_space(self.m, self.c, self.l)
         self._Sinv = np.linalg.inv(S_real)
         self._Dinv = self._M + self._Sinv
 
         self._fit()
-    
-    def optimize_posterior(self):
+
+    def _fit(self, cg = False):
+        """Compute the mean and variance"""
+        if cg:
+            self._mu = self.calculate_mu_cg(self._Dinv, self._j)
+        else:
+            self._mu = self.calculate_mu_cholesky(self._Dinv)
+
+    def optimize_posterior(self, method = "emcee"):
         self._logdets_D = []
         self._logdets_S = []
         self._jTDj = []
@@ -740,26 +747,24 @@ class GaussianModel:
 
         self._optimization_time = 0
 
-        self._x0 = [self.m, self.log_c]  # Initial guess for m, c, log_l.
-        self._m_bounds, self._log_c_bounds, self._log_l_bounds = (-6, -1.9), (7,30), (5, 6.5)
-        self._bounds = [self._m_bounds, self._log_c_bounds]
+        self._x0 = [self.m, self.logc, self.logl]  # Initial guess for m, c, logl.
+        self._m_bounds = (-6, -1.9)
+        self._logc_bounds = (7, 30)
+        self._logl_bounds = (5, 6.5)
+        self._bounds = [self._m_bounds, self._logc_bounds, self._logl_bounds]
 
         
         print("....................................OPTIMIZING.................................. ")
-        print("                 --------------> Initial parameters: m, c, log_l:", self.m, self.log_c, self.log_l)
-        print("                 --------------> Bounds for m, log_c:", self._m_bounds, self._log_c_bounds)
-        self.optimize() # Finding best parameters to S matrix.
-        self.one_fit(param = self._best)  # Fit with the best parameters.
+        print(" ---> Initial parameters: m, logc, logl:", self.m, self.logc, self.logl)
+        print(" ---> Bounds for m, logc, logl:", self._m_bounds, self._logc_bounds, self._logl_bounds)
+        self.optimize(method = method) # Finding best parameters to S matrix.
         print("....................................OPTIMIZING.................................. ")
 
     def optimize(self, method = "emcee"):
-        """
-        from scipy.optimize import minimize, check_grad
-        print("Checking the gradient first..")
-        log_l = np.log(self.l)  # Convert l to log_l for optimization
-        err = check_grad(self.likelihood, self.grad_likelihood, [self.m, self.c, log_l])
-        print("                        -----------> Gradient error:", err)
-        """
+        #from scipy.optimize import minimize, check_grad
+        #print("Checking the gradient first..")
+        #err = check_grad(self.likelihood, self.grad_likelihood, [self.m, self.c, logl])
+        #print("--> Gradient error: ", err)
 
         start_time = time.time()
         self._optimizing = True
@@ -771,122 +776,121 @@ class GaussianModel:
             self._optimization_res = self.differential_evolution_optimizer()
             self._best = self._optimization_res.x
 
-        if method == "genetic":
+        elif method == "genetic":
             self._optimization_res = self.genetic_optimizer()
             self._best = self._optimization_res.X
-        
-        if method == "emcee":
-            self.emcee_optimizer()
-        else:
-            self._optimization_res = self.scipy_minimizer(method=method)
-            self._best = self._optimization_res.x
-        
-        self.m, self.log_c, self.log_l = self._best
-        self.c = 10**self.log_c  # Convert log_c to c.
-        self.l = 10**self.log_l
 
-        print("                 --------------> Best parameters founded for: m, log_c: ", self.m, self.log_c, self.log_l)
+        elif method == "emcee":
+            self.emcee_optimizer()
+
+        elif method == "scipy":
+            self._optimization_res = self.scipy_minimizer()
+            self._best = self._optimization_res.x
+        else:
+            raise ValueError("Method not recognized. Choose one of: differential_evolution, genetic, emcee, scipy")
+        
+        self.m, self.logc, self.logl = self._best
+        self.c = 10**self.logc  # Convert logc to c.
+        self.l = 10**self.logl
+
+        print("--> Best parameters founded for: m, logc, logl: ", self.m, self.logc, self.logl)
 
         self._optimization_time = time.time() - start_time
 
         print("--- %s minutes to minimizing ---" % (self._optimization_time/60))
 
-    def _fit(self):
-        """Compute the mean and variance"""
-        self._mu = self.calculate_mu_cholesky(self._Dinv)
-        #self._mu = self.calculate_mu_gc(Dinv)
+    def m_log_posterior(self, param = None):
+        """
+        Calculate the negative log posterior for given parameters m, c, logl.
+        The log posterior is given by
+            log P(m, c, l | V) = logP(m,c,l) - 0.5*log|S| + 0.5*log|D| + 0.5*j^T D j
+        """
+        m, logc, logl = self.m, self.logc, self.logl
 
-    def m_log_posterior(self, param):
-        from scipy.special import gamma
-        m, log_c = param
-        
-        log_l = self.log_l
+        if param is not None:
+            m, logc, logl = param
 
-        c = 10**(log_c)  # Convert log_c to c.
-        l = 10**(log_l)  # Convert log_l to l.
-        print("......................................... Calculating likelihood with m, c, log(l): ", m, c, log_l)
+        c = 10**(logc)  # Convert logc to c.
+        l = 10**(logl)  # Convert logl to l.
+        print("--> Calculating m_log_posterior with m, logc, logl: ", m, logc, logl)
         start_time = time.time()
 
         S_real  = self.calculate_S_real_space(m, c, l)
 
-        #start_time = time.time()
+        start_time = time.time()
         self._Sinv = np.linalg.inv(S_real)
-        #print("       --- %s calculate S_real_inv ---" % (time.time()/60 - start_time/60))
+        print("+ %.2f seconds for S_real_inv " % (time.time() - start_time))
 
         self._Dinv = self._M + self._Sinv 
 
-        #start_time = time.time()
+        start_time = time.time()
         self._fit()
         mu = self._mu
-        #print("       --- %s mu ---" % (time.time()/60 - start_time/60))
+        print("+ %.2f seconds for mu " % (time.time() - start_time))
 
         # Calculate the log determinants.
-        #start_time = time.time()
+        start_time = time.time()
         logdetS = np.linalg.slogdet(S_real)[1]
-        #print("       --- %s determinant of S ---" % (time.time()/60 - start_time/60))
+        print("+ %.2f seconds for log|S|  " % (time.time() - start_time))
 
-        #start_time = time.time()
-        #print("       --- %s calculate D ---" % (time.time()/60 - start_time/60))
-
-        #start_time = time.time()
+        start_time = time.time()
         logdetD = -np.linalg.slogdet(self._Dinv)[1]
-        #print("       --- %s determinant of D ---" % (time.time()/60 - start_time/60))
+        print("+ %.2f seconds for |D| " % (time.time() - start_time))
 
-        #if we assume P(m) = P(c) = 1, then we have no prior on m and c. 
-        # # np.log(np.abs((1/m)*(1/c))) 
+        # We assume P(m) = P(c) = 1, then we have no prior on m and c.
+        """
         from scipy.special import gamma
         def log_inverse_gamma(q_i, p0):
             p_q_i = self._power_spectrum(q_i, m, c)
-            #inverse_gamma = ((p0/p_q_i)**self._alpha)*np.exp(-p0/p_q_i)
             return self._alpha*np.log(p0/p_q_i) - (p0/p_q_i)
 
-        #N = 300
-        #array = np.unique(self._qs)
-        #indexes = np.linspace(0, len(array)-1, N, dtype=int)[1:][:-1]  # Avoid the first and last points.
-        #freqs_spaced = array[indexes]
-        #print(" -------------------------------------------------> frequencies: ", freqs_spaced)
-        log_prior_1 = 0 #(log_inverse_gamma(self._min_freq, 1e-15) + log_inverse_gamma(self._max_freq, 1e-15)) #+ np.sum(log_inverse_gamma(freqs_spaced, 1e-)))
-        #print("                 --------------> sampling ", N, " points of ", len(array))
-        #prior_1 = inverse_gamma(self._min_freq) * inverse_gamma(self._max_freq)
-        
+        log_prior_1 = (log_inverse_gamma(self._min_freq, 1e-15) + log_inverse_gamma(self._max_freq, 1e-15))
+
         # We want a gamma prior on l^2 (or an inverse gamma prior on l^(-2)).
-        #constant1 = -np.log(self._beta*gamma(self._alpha)) + np.log(2) +(self._alpha + 1)*np.log(self._alpha) - np.log(gamma(self._alpha + 1))
-        #k = l**(-2)
-        #log_inverse_gamma_l = 2*(self._alpha + 1)*log_l - (self._beta/k) - 3*log_l
-        #log_prior_2 = log_inverse_gamma_l
+        constant1 = -np.log(self._beta*gamma(self._alpha)) + np.log(2) +(self._alpha + 1)*np.log(self._alpha) - np.log(gamma(self._alpha + 1))
+        k = l**(-2)
+        log_prior_2 = 2*(self._alpha + 1)*logl - (self._beta/k) - 3*logl
+        """
+
+        log_prior_1 = 0  # No prior on m, c, so we set it to zero.
         log_prior_2 = 0  # No prior on l, so we set it to zero.
 
         jTDj = np.dot(np.transpose(self._j), mu)
 
-        #constants_to_ignore = - constant1 + self._log_det_N + 0.5*self._VtNm1V + self._factor
-        log_posterior =  (log_prior_1 + log_prior_2 - 0.5*logdetS + 0.5*logdetD + 0.5*jTDj) # + constants_to_ignore
+        log_posterior =  (log_prior_1 + log_prior_2 - 0.5*logdetS + 0.5*logdetD + 0.5*jTDj)
         m_log_posterior = - log_posterior
 
         total_time = time.time() - start_time
-        print("--- %s seconds to calculate log_likelihood ---" % (total_time))
+        print("--> In total %.2f seconds for -logP(param|data) " % (total_time))
 
         if self._optimizing:
             self._ms.append(m)
-            self._cs.append(log_c)
-            self._ls.append(log_l)
+            self._cs.append(logc)
+            self._ls.append(logl)
             
             self._logprior_1.append(log_prior_1)
             self._logprior_2.append(log_prior_2)
-            self._jTDj.append(jTDj)
-            self._logdets_D.append(logdetD)
-            self._logdets_S.append(logdetS)
-            self._log_posteriors.append(log_posterior)
+            self._jTDj.append(-0.5*jTDj)
+            self._logdets_D.append(-0.5*logdetD)
+            self._logdets_S.append(0.5*logdetS)
+            self._log_posteriors.append(m_log_posterior)
 
             self._times.append(total_time)
 
-        return m_log_posterior, 0.5*logdetS, -0.5*logdetD,  -0.5*jTDj
+        self.logdetS = 0.5*logdetS
+        self.logdetD = -0.5*logdetD
+        self.jTDj = -0.5*jTDj
 
-    def grad_likelihood(self, param):
-        m, c = param
+        return m_log_posterior
 
-        print("Calculating gradient of likelihood with m, c, l: ", m, c)
+    def gradient_m_log_posterior(self, param):
+        m, logc = param
 
-        l = 10**(self.log_l)  # Convert log_l to l
+        logl = self.logl
+        c = 10**(logc)
+        l = 10**(logl)
+
+        print("Calculating gradient of m_log_posterior with m, c, l: ", m, c, l)
 
         P_q1 = self._power_spectrum(self._q1, m, c)
         P_q2 = self._power_spectrum(self._q2, m, c)
@@ -915,11 +919,10 @@ class GaussianModel:
         dlog_prior_dlogm = m*self._alpha* P_min_freq * P_max_freq * self._p0 * (np.log(self._min_freq)/ P_min_freq + np.log(self._max_freq)/P_max_freq)
         
         # dlogP(m, c, l)/dlogc
-        dlog_prior_dlogc = c*self._alpha* P_min_freq * P_max_freq * self._p0 * (self._min_freq**(2*m)/ P_min_freq**3 + self._max_freq**(2*m) / P_max_freq**3)
+        dlog_prior_dlogc = 0 #c*self._alpha* P_min_freq * P_max_freq * self._p0 * (self._min_freq**(2*m)/ P_min_freq**3 + self._max_freq**(2*m) / P_max_freq**3)
         
         # dlogP(m, c, l)/dlogl
-        dlog_prior_dlogl = 0  
-        #dlog_prior_dlogl = 2*(self._alpha-1) - 2*(l**2)*self._beta
+        dlog_prior_dlogl = 0 #dlog_prior_dlogl = 2*(self._alpha-1) - 2*(l**2)*self._beta
 
         # dlogS_dlogm
         dlogS_dlogm = (
@@ -944,25 +947,27 @@ class GaussianModel:
         # dlogjTmu_dlogm, dlogjTmu_dlogc, dlogjTmu_dlogl
         S_real  = self.calculate_S_real_space(m, c, l)
         S_real_inv = np.linalg.inv(S_real)
-        Dinv = self._M + S_real_inv
-        D = np.linalg.inv(Dinv)
-        mu = self.calculate_mu_gc(Dinv)
-        mu_T = mu.T
+        self._Dinv = self._M + S_real_inv
+        D = np.linalg.inv(self._Dinv)
+    
+        self._fit()
+        mu = self._mu
+        mu_T = np.transpose(mu)
 
         Sm1_Fm1 = np.matmul(S_real_inv, self.Ykm, dtype="complex128")
-        Sm1_F_f_m1 = np.matmul(S_real_inv, self.Ykm_f_conj, dtype="complex128")
+        Sm1_F_f_m1 = np.matmul(S_real_inv, self.Ykm, dtype="complex128")
         F_Sm1 = np.matmul(self.Ykm_conj, S_real_inv, dtype="complex128")
 
-        # dlogjTmu / dlogm
-        dlogjTmu_dlogm = (
+        # dlog_0p5_jTmu / dlogm
+        dlog_0p5_jTmu_dlogm = 1/2 * (
             mu_T @
             Sm1_Fm1 @
             dlogS_dlogm @
             F_Sm1 @
             mu
         )
-        # djT\mu / dlogc   
-        dlogjTmu_dlogc = (
+        # dlog_0p5_jTmu / dlogc   
+        dlog_0p5_jTmu_dlogc = 1/2 * (
             mu_T @
             Sm1_Fm1 @
             dlogS_dlogc @
@@ -970,8 +975,8 @@ class GaussianModel:
             mu
         )
 
-        # dlogjTmu / dlogl
-        dlogjTmu_dlogl = (
+        # dlog_0p5_jTmu / dlogl
+        dlog_0p5_jTmu_dlogl = 1/2 * (
             mu_T @
             Sm1_Fm1 @
             dlogS_dlogl @
@@ -979,14 +984,13 @@ class GaussianModel:
             mu
         )
 
-        # dlog_0p5_det_DSm1_dlogm
         F_Sm1_D = F_Sm1 @ D
 
         dlog_0p5_det_DSm1_dlogm = (
             1/2 *
             (
                 np.trace(Sm1_Fm1 @ dlogS_dlogm @ F_Sm1_D) -
-                np.trace(Sm1_F_f_m1 @ dlogS_dlogm @ self.Ykm_f)
+                np.trace(Sm1_F_f_m1 @ dlogS_dlogm @ self.Ykm_conj)
             )
         )
         
@@ -994,7 +998,7 @@ class GaussianModel:
             1/2 *
             (
                 np.trace(Sm1_Fm1 @ dlogS_dlogc @ F_Sm1_D) - 
-                np.trace(Sm1_F_f_m1 @ dlogS_dlogc @ self.Ykm_f) 
+                np.trace(Sm1_F_f_m1 @ dlogS_dlogc @ self.Ykm_conj) 
             )
         )
         
@@ -1002,17 +1006,17 @@ class GaussianModel:
             1/2 *
             (
                 np.trace(Sm1_Fm1 @ dlogS_dlogl @ F_Sm1_D) -
-                np.trace(Sm1_F_f_m1 @ dlogS_dlogl @ self.Ykm_f) 
+                np.trace(Sm1_F_f_m1 @ dlogS_dlogl @ self.Ykm_conj) 
             )
         )
 
-        dlog_dlogm = dlogjTmu_dlogm + dlog_0p5_det_DSm1_dlogm + dlog_prior_dlogm
-        dlog_dlogc = dlogjTmu_dlogc + dlog_0p5_det_DSm1_dlogc + dlog_prior_dlogc
-        #dlog_dlogl = dlog_prior_dlogl + dlogjTmu_dlogl + dlog_0p5_det_DSm1_dlogl
+        dlog_dlogm = dlog_0p5_jTmu_dlogm + dlog_0p5_det_DSm1_dlogm + dlog_prior_dlogm
+        dlog_dlogc = dlog_0p5_jTmu_dlogc + dlog_0p5_det_DSm1_dlogc + dlog_prior_dlogc
+       #dlog_dlogl = dlog_prior_dlogl + dlogjTmu_dlogl + dlog_0p5_det_DSm1_dlogl
 
         grad_m_log_likelihood = - np.array([
                             dlog_dlogm,
-                            dlog_dlogc
+                            dlog_dlogc #,dlog_dlogl
                             ]
                         ).real
 
@@ -1044,7 +1048,7 @@ class GaussianModel:
                     f = 1e50
                 out["F"] = f
 
-        problem = MinPYMOO(self.likelihood, self._bounds)
+        problem = MinPYMOO(self.m_log_posterior, self._bounds)
 
         """
         algorithm = GA(
@@ -1078,7 +1082,7 @@ class GaussianModel:
 
         print("Using differential evolution for global optimization")
 
-        result = differential_evolution(    self.likelihood,
+        result = differential_evolution(    self.m_log_posterior,
                                             bounds=self._bounds,
                                             maxiter=50,
                                             popsize=10,
@@ -1092,30 +1096,30 @@ class GaussianModel:
 
         return result
 
-    def scipy_minimizer(self, method="trust-ncg"):
+    def scipy_minimizer(self, method="trust-constr"):
         from scipy.optimize import minimize
 
-        result = minimize(  self.likelihood,
+        result = minimize(  self.m_log_posterior,
                             x0=np.array(self._x0),
                             method=method, 
                             #jac=self.grad_likelihood,
                             tol=1e-9,
                             options={
-                                #'maxiter': 100,
-                                'verbose': 3,}, # 'gtol': 1e-9}
+                                'maxiter': 10,
+                                'verbose': 3,},
                             bounds=self._bounds)
         if not result.success:
             print("Optimization failed:", result.message)
 
         return result
 
-    def log_posterior(self, params):
+    def log_posterior_emcee(self, params):
         from numpy.linalg import slogdet
 
-        m, log_c, log_l = params[0], params[1], self.log_l
+        m, logc, logl = params[0], params[1], params[2]
 
-        c = 10.0**log_c
-        l = 10.0**self.log_l   # Keep l fixed during emcee optimization.
+        c = 10.0**logc
+        l = 10.0**logl   # Keep l fixed during emcee optimization.
 
         try:
             S = self.calculate_S_real_space(m, c, l)
@@ -1158,18 +1162,18 @@ class GaussianModel:
 
     def emcee_optimizer(self):
         import emcee
-        import numpy as np
 
-        nwalkers = 25 # before 20, 30, 80
+        nwalkers = 20
         ndim = 3
-        burn = 50
-        steps = 200
+        burn = 5
+        steps = 10
 
         m_lo, m_hi = self._m_bounds
-        c_lo, c_hi = self._log_c_bounds
-        l_lo, l_hi = self._log_l_bounds
+        c_lo, c_hi = self._logc_bounds
+        l_lo, l_hi = self._logl_bounds
 
-        # ---  Fixed slope from previous analysis and REPARAMETRIZATION---
+
+        # Fixed slope from previous analysis and reparametrization
         a = -4.2
         b = 1.1
         
@@ -1185,67 +1189,64 @@ class GaussianModel:
             logc = a*m + b + logc_rep * slogc_rep
             return np.array([m, logc])
 
-        # --- Log-probability in (u,v) space ---
+        # Log-probability in (u,v) space
         def log_prob_rep(params):
             m_rep, logc_rep, logl = params
             m, logc = from_rep(m_rep, logc_rep)
             if not (m_lo <= m <= m_hi and c_lo <= logc <= c_hi and l_lo <= logl <= l_hi):
                 return -np.inf
-            return self.log_posterior([m, logc])
+            return self.log_posterior_emcee([m, logc, logl])
 
-        # --- Initialize walkers around MAP (transformed) ---
+        # Initialize walkers around MAP (transformed)
         theta_map = np.array([-2, 8, 5.5])
         center = to_rep(theta_map[0], theta_map[1]), theta_map[2]
         u, v = to_rep(theta_map[0], theta_map[1])
         center = np.array([u, v, theta_map[2]])
-        scale = np.array([1.0, 1.0, 1.0]) # Small spread in u (perpendicular), larger in v (along the diagonal)
+        scale = np.array([0.5, 0.5, 0.5])
         p0_rep = center + np.random.randn(nwalkers, 3) * scale
 
-        # --- Sampler moves ---
+        # Sampler moves
         moves = [
-            (emcee.moves.StretchMove(a=2.0), 0.6),
-            (emcee.moves.DEMove(sigma=0.6), 0.4),
+            (emcee.moves.StretchMove(a=1.0), 0.6),
+            (emcee.moves.DEMove(sigma=0.5), 0.4),
         ]
 
         sampler = emcee.EnsembleSampler(nwalkers, ndim, log_prob_rep, moves=moves)
 
         try:
-            # corre normalmente; puedes interrumpir con Ctrl+C en cualquier momento
-            state = sampler.run_mcmc(p0_rep, steps, progress=True)
+            state = sampler.run_mcmc(p0_rep, steps, progress=True, store=True)
 
         except KeyboardInterrupt:
             print("Sampling interrupted by user (Ctrl+C). Saving partial results...")
 
         finally:
-            # siempre se ejecuta: guarda lo que haya
             self.sampler = sampler
-            steps_done = sampler.iteration
-            if steps_done == 0:
-                print("No samples to save.")
-                
-            burn_eff = min(burn, max(steps_done - 1, 0))  # por si cortas muy temprano
 
-            # muestras en espacio reparametrizado (post-burn)
-            flat_rep  = sampler.get_chain(discard=burn_eff, flat=True)   # shape (Nsamp, 2)
-            flat_logp = sampler.get_log_prob(discard=burn_eff, flat=True)
+        steps_done = getattr(sampler, "iteration", 0)
+        if steps_done == 0:
+            print("No samples to save (iteration=0). Did sampling start?")
+            return  # o 'raise RuntimeError(...)' dentro de tu método
 
-            # transforma a (m, logc)
-            flat_samples = np.array([from_rep(mr, cr) for mr, cr in flat_rep[:, :2]])
-            flat_samples = np.hstack([flat_samples, flat_rep[:, 2:3]])  # añade logl sin cambiar
+        burn_eff = min(burn, max(steps_done - 1, 0))
 
-            # MAP y resumen
-            imax = np.argmax(flat_logp)
-            theta_map = flat_samples[imax]
-            med = np.median(flat_samples, axis=0)
-            q16, q84 = np.percentile(flat_samples, [16, 84], axis=0)
+        flat_rep  = sampler.get_chain(discard=burn_eff, flat=True)
+        flat_logp = sampler.get_log_prob(discard=burn_eff, flat=True)
 
-            # guarda en el objeto
-            self.samples = flat_samples
-            self.samples_logp = flat_logp
-            self._best = theta_map
+        flat_samples = np.array([from_rep(mr, cr) for mr, cr in flat_rep[:, :2]])
+        flat_samples = np.hstack([flat_samples, flat_rep[:, 2:3]]) 
 
-            print(f"acceptance ≈ {np.mean(sampler.acceptance_fraction):.3f} | steps={steps_done} | burn={burn_eff}")
-            print("MAP:", theta_map, " median:", med, " [-, +]:", med-q16, q84-med)
+        # MAP value
+        imax = np.argmax(flat_logp)
+        theta_map = flat_samples[imax]
+        med = np.median(flat_samples, axis=0)
+        q16, q84 = np.percentile(flat_samples, [16, 84], axis=0)
+
+        self.samples = flat_samples
+        self.samples_logp = flat_logp
+        self._best = theta_map
+
+        print(f"acceptance ≈ {np.mean(sampler.acceptance_fraction):.3f} | steps={steps_done} | burn={burn_eff}")
+        print("MAP:", theta_map, " median:", med, " [-, +]:", med-q16, q84-med)
 
     def calculate_S_real_space(self, m, c, l):
         #start_time = time.time()
@@ -1519,7 +1520,6 @@ class GaussianModel:
             # Return incomplete progress
             return x, maxiter
 
-
     def plot_stats_optimization(self):
         iterations = np.arange(1, len(self._log_posteriors) + 1)
 
@@ -1527,15 +1527,15 @@ class GaussianModel:
         axs = axs.ravel()
 
         axs[0].plot(iterations, self._log_posteriors)
-        axs[0].set_title("Log likelihood variation")
+        axs[0].set_title("- log posterior variation")
         axs[0].set_xlabel("Iterations")
 
         axs[1].plot(iterations, self._jTDj)
-        axs[1].set_title("jTDj term variation")
+        axs[1].set_title("-jTDj term variation")
         axs[1].set_xlabel("Iterations")
 
         axs[2].plot(iterations, self._logdets_D)
-        axs[2].set_title("Log|D| term variation")
+        axs[2].set_title("-Log|D| term variation")
         axs[2].set_xlabel("Iterations")
 
         axs[3].plot(iterations, self._logdets_S)
@@ -1555,19 +1555,19 @@ class GaussianModel:
         axs[6].set_xlabel("Iterations")
 
         axs[7].plot(iterations, self._cs, label="c")
-        axs[7].set_title(f"log(c) parameter ({self._log_c_bounds})")
+        axs[7].set_title(f"log(c) parameter ({self._logc_bounds})")
         axs[7].set_xlabel("Iterations")
 
         axs[8].plot(iterations, self._ls, label="l")
-        axs[8].set_title(f"log(l) length scale ({self._log_l_bounds})")
+        axs[8].set_title(f"log(l) length scale ({self._logl_bounds})")
         axs[8].set_xlabel("Iterations")
 
-        fig.suptitle(f'Total time {self._optimization_time/60:2f} min, with best values (m, c) =  ({self._best[0]:2f}, {self._best[1]:2f})', fontsize=10)
+        fig.suptitle(f'Total time {self._optimization_time/60:.2f} min, with best: (m, logc, logl) =  ({self._best[0]:2f}, {self._best[1]:2f},  {self._best[2]:2f})', fontsize=10)
 
         fig.tight_layout()
         plt.show()
 
     @property
-    def mean(self):
+    def sol(self):
         """Return the mean of the posterior."""
         return self._mu
