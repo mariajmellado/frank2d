@@ -32,6 +32,8 @@ class Frank2D(object):
             Geometry object containing source geometry parameters.
         """
         self._N =  N
+        self._Nx = N
+        self._Ny = N
         self._N2 = self._N*self._N
         self._Rmax = Rmax/rad_to_arcsec
         self._Geometry = geom
@@ -49,8 +51,8 @@ class Frank2D(object):
         self._set_gridded_data = False
         self._set_fit_method = False
 
-        self.sol_visibility = None
-        self.sol_intensity = None
+        self._sol_visibility = None
+        self._sol_intensity = None
 
     def set_kernel(self, type_kernel, kernel_params):
         """
@@ -213,8 +215,12 @@ class Frank2D(object):
         vis_gridded = self._gridded_data['vis']
         weights_gridded = self._gridded_data['weights']
 
-        index_w = np.argwhere(weights_gridded != 0).flatten()
-        index_uw = np.argwhere(weights_gridded == 0).flatten()
+        W = weights_gridded.reshape(self._Nx, self._Ny)
+        mask = (W != 0)
+
+        r = mask.ravel(order="C")
+        index_w  = np.flatnonzero(r)
+        index_uw = np.flatnonzero(~r)  
 
         # data with weights != 0.
         u_weighted = u_gridded[index_w]
@@ -237,6 +243,10 @@ class Frank2D(object):
     def build_full_visibility_model(self):
         """
         Build the full visibility model from the weighted and non-weighted solution.
+        Return
+        -------
+        V_full : 2D array, unit: Jy
+            Full visibility model on a Nx x Ny grid.
         """
         print("Building full visibility model...")
 
@@ -263,10 +273,10 @@ class Frank2D(object):
         V1 = S11.matvec(self._sol_visibility_weighted)
         V2 = S_12_T.matvec(self._sol_visibility_weighted)
 
-        V_full = np.zeros((self._N, self._N), dtype="c16")
+        V_full = np.zeros((self._Nx, self._Ny), dtype="c16")
 
-        data_coords_w = np.unravel_index(index_w, (self._N, self._N))
-        data_coords_uw = np.unravel_index(index_uw, (self._N, self._N))
+        data_coords_w = np.unravel_index(index_w, (self._Nx, self._Ny))
+        data_coords_uw = np.unravel_index(index_uw, (self._Nx, self._Ny))
 
         V_full[data_coords_w] = V1
         V_full[data_coords_uw] = V2
@@ -321,11 +331,14 @@ class Frank2D(object):
             self.set_fit_method(method, x0, maxiter, rtol)
 
         self._sol_visibility_weighted = self._solver.run()
-        self.sol_visibility = self.build_full_visibility_model()
+        self._sol_visibility = self.build_full_visibility_model()
 
-        self.sol_intensity = self._FT.fast_transform(self.sol_visibility, direction = "backward")
+        self._sol_intensity = self.transform(self._sol_visibility)
 
-    def frank1d(self, u, v, Vis, Weights, alpha = 1.3, w_smooth = 1e-3, n_pts = 300):
+    def transform(self, vis, direction = "backward"):
+        return self._FT.fast_transform(vis, direction = direction)
+
+    def frank1d(self, u = None, v = None, vis= None, weights = None, alpha = 1.3, w_smooth = 1e-3, n_pts = 300):
         """
         Perform a 1D Frank fit on the visibility data.
         Parameters:
@@ -357,28 +370,77 @@ class Frank2D(object):
         geom_f1d = SourceGeometry(inc= inc, PA= pa, dRA= dra, dDec= ddec)
         FF = FrankFitter(Rout, n_pts, geom_f1d, alpha = alpha, weights_smooth = w_smooth)
 
-        if not self._set_gridded_data:
-            self.preprocess_vis(u, v, Vis, Weights, hermitian = True)
-        u_gridded, v_gridded = self._gridded_data["u"], self._gridded_data["v"]
-        vis_gridded = self._gridded_data["vis"]
-        weights_gridded = self._gridded_data["weights"]
+        if  u is None or v is None or vis is None or weights is None:
+            if not self._set_gridded_data:
+                self.preprocess_vis(u, v, Vis, Weights, hermitian = True)
+            u_gridded, v_gridded = self._gridded_data["u"], self._gridded_data["v"]
+            vis_gridded = self._gridded_data["vis"]
+            weights_gridded = self._gridded_data["weights"]
+        else:
+            u_gridded, v_gridded = u, v
+            vis_gridded = vis
+            weights_gridded = weights
 
         sol = FF.fit(u_gridded, v_gridded, vis_gridded, weights_gridded)
-        vis_fit_1d = sol.predict(u_gridded, v_gridded, sol.mean, geometry = geom_f1d)
 
-        return vis_fit_1d
+        return sol
     
     @property
     def gridded_data(self):
         """ Gridded visibility data in a dict. """
         return self._gridded_data
+
+    @property
+    def u(self):
+        """ u - 1d collocation points in lambda (0 centered)."""
+        return self._FT.u
+    
+    @property
+    def u_grid(self):
+        """ u collocation points in lambda (0 centered) on a grid."""
+        return self._FT._Un.reshape((self._Nx, self._Ny), order = 'C')
+    
+    @property
+    def v(self):
+        """ v 1d - collocation points in lambda (0 centered)."""
+        return self._FT.v
+    
+    @property
+    def v_grid(self):
+        """ v collocation points in lambda (0 centered) on a grid."""
+        return self._FT._Vn.reshape((self._Nx, self._Ny), order = 'C')
+    
+    @property
+    def x(self):
+        """ x collocation points in rad."""
+        return self._FT._x
+    
+    @property
+    def x_grid(self):
+        """ x collocation points in rad on a grid."""
+        return self._FT._Xn.reshape((self._Nx, self._Ny), order = 'C')
+    
+    @property
+    def y(self):
+        """ y collocation points in rad."""
+        return self._FT._y
+    
+    @property
+    def y_grid(self):
+        """ y collocation points in rad on a grid."""
+        return self._FT._Yn.reshape((self._Nx, self._Ny), order = 'C')
     
     @property
     def visibility_model(self):
         """ 2D visibility model in Jy. """
-        return self.sol_visibility.reshape(self._N, self._N)
+        return self._sol_visibility.reshape((self._Nx, self._Ny), order='C')
+
+    @property
+    def Rmax(self):
+        """ Maximum value of the x coordinate in arcseconds."""
+        return self._Rmax*rad_to_arcsec
     
     @property
     def intensity_model(self):
         """ 2D intensity model in Jy/sr """
-        return self.sol_intensity.reshape(self._N, self._N).real
+        return self._sol_intensity.reshape((self._Nx, self._Ny), order='C').real

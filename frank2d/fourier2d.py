@@ -22,24 +22,42 @@ class FourierTransform2D(object):
         # Real space collocation points.
         self._x = np.linspace(-self._Xmax, self._Xmax, self._Nx, endpoint=False) # rad
         self._y = np.linspace(-self._Ymax, self._Ymax, self._Ny, endpoint=False) # rad
-        x_, y_ = np.meshgrid(self._x, self._y, indexing='ij')
+        x_, y_ = np.meshgrid(self._x, self._y)
         x_n, y_n = x_.reshape(-1), y_.reshape(-1) # x_n.shape = (N2,1)
-        self._dx = 2*self._Xmax/self._Nx
+        self._dx = 2*self._Xmax/self._Nx # rad.
         self._dy = 2*self._Ymax/self._Ny
+
+        self._Xn = x_n
+        self._Yn = y_n
 
         # Frequency space collocation points.
         self._u = np.fft.fftfreq(self._Nx, d = self._dx) # unshifted
         self._v = np.fft.fftfreq(self._Ny, d = self._dy) # unshifted
+
+
+        # Shifted points (so that zero frequency is at the center of the array).
         self._u_shifted = np.fft.fftshift(self._u)
         self._v_shifted = np.fft.fftshift(self._v)
         
-        u_, v_ = np.meshgrid(self._u, self._v, indexing='ij') 
-        u_n, v_n = u_.reshape(-1), v_.reshape(-1) # u_n.shape = (N2,1)
+        # Default shifted points.
+        u_shifted, v_shifted = np.meshgrid(self._u_shifted, self._v_shifted)
 
-        self._Xn = x_n
-        self._Yn = y_n
-        self._Un = u_n
-        self._Vn = v_n
+        # u is positive to the right, v is positive downwards.
+        # convention is u to left, v upwards. East and North.
+        u_shifted_convention = (-u_shifted).ravel(order="C")
+        v_shifted_convention = (-v_shifted).ravel(order="C")
+
+        u_shifted = u_shifted.ravel(order="C") # shape = (N2,1)
+        v_shifted = v_shifted.ravel(order="C")
+
+        self._Un = u_shifted
+        self._Vn = v_shifted
+
+        self._Un_convention = u_shifted_convention
+        self._Vn_convention = v_shifted_convention
+
+        self._Un_unshifted = None
+        self._Vn_unshifted = None
         
         self._in = True
 
@@ -83,15 +101,20 @@ class FourierTransform2D(object):
         Compute the 2D-FFT of an element.
         Parameters
         ----------
-        obj : 1D array_like
-            Object to be transformed.
+        obj : 2D array_like, shape = (Nx, Ny)
+            Object to be transformed. Is assumed to be in a shifted form, i.e.,
+            with the zero frequency at the center.
         direction : str
             Direction of the transform. Can be 'forward' or 'backward'.
         """
+        # np.fft.fft2 assumes the zero frequency is at the [0,0] index.
+        # so we need to unshift the object first.
+        obj_unshifted = np.fft.ifftshift(obj)
+
         if direction == 'forward':
-            return np.fft.fftshift(np.fft.fft2(obj.reshape(self._Nx, self._Ny)).real)*(self._dx * self._dy)
+            return np.fft.fftshift(np.fft.fft2(obj_unshifted))*(self._dx * self._dy)
         elif direction == 'backward':
-            return np.fft.fftshift(np.fft.ifft2(obj.reshape(self._Nx, self._Ny)).real)/(self._dx * self._dy)
+            return np.fft.fftshift(np.fft.ifft2(obj_unshifted))/(self._dx * self._dy)
         else:
             raise AttributeError("direction must be one of {}"
                                  "".format(['forward', 'backward']))
@@ -132,11 +155,39 @@ class FourierTransform2D(object):
         return self._Xmax
     
     @property
-    def xy_points(self):
-        """ Collocation points in the image plane"""
-        return self._Xn, self._Yn
+    def u(self):
+        """ Collocation points in the frequency plane (0-centered)"""
+        return self._u_shifted
     
     @property
-    def uv_points(self):
-        """ Collocation points in the frequency plane"""
-        return self._Un, self._Vn
+    def v(self):
+        """ Collocation points in the frequency plane (0-centered)"""
+        return self._v_shifted
+
+    @property
+    def x(self):
+        """ Collocation points x-axis in the image plane"""
+        return self._x
+    
+    @property
+    def y(self):
+        """ Collocation points y-axis in the image plane"""
+        return self._y
+
+    @property
+    def uv_points_convention(self):
+        """ Collocation points in the frequency plane with u to left, v upwards"""
+        if self._Un_convention is None:
+            u_convention = np.flip(self._Un, axis = 1).ravel(order="C")
+            v_convention = np.flip(self._Vn, axis = 0).ravel(order="C")
+            self._Un_convention, self._Vn_convention = u_convention, v_convention
+
+    @property
+    def uv_points_unshifted(self):
+        """ Unshifted collocation points in the frequency plane"""
+        if self._Un_unshifted is None:
+            u, v = np.meshgrid(self._u, self._v)
+            u, v = u.ravel(order="C"), v.ravel(order="C")
+            self._Un_unshifted, self._Vn_unshifted = u, v
+
+        return self._Un_unshifted, self._Vn_unshifted
