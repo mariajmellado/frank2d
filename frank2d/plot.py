@@ -165,7 +165,6 @@ class Plot(object):
         last  = x[-1] + (x[-1] - x[-2]) / 2.0
         return np.r_[first, mids, last]
 
-
     def  visibility_profile(self, 
                             input = None, frank1d = False, weighted = True,
                             bins = 300,
