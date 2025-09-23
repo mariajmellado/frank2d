@@ -1,0 +1,5 @@
+/Notebooks/*.pkl
+/Notebooks/*.pickle
+/Notebooks/*.fits
+/Notebooks/**/*.fits
+.DS_Store
