@@ -98,7 +98,7 @@ class Geometry(object):
         and then scaling the x coordinate by cos(inc).
         """
         inc = self._inc*deg_to_rad
-        pa = (self._pa-90)*deg_to_rad
+        pa = self._pa*deg_to_rad
 
         cos_i = np.cos(inc)
         cos_pa, sin_pa = np.cos(pa), np.sin(pa)

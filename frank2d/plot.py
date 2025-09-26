@@ -60,17 +60,16 @@ class Plot(object):
             raise ValueError("type must be 'input' or 'model'")
 
         # Shifted already.
-        u = self._u_model #(N, N)
-        v = self._v_model
+        # The signs are because convention: East of North.
+        u = -self._u_model #(N, N)
+        v = -self._v_model
         if phase_shift:
-            # Only in this scheme (East of North) makes sense to do the phase shifting.
-            vis = geom.apply_phase_shift(-u, -v, vis)
+            vis = geom.apply_phase_shift(u, v, vis)
         
         if deproject: 
             ud, vd, _ = geom.deproject(u, v)
             u, v = ud, vd
 
-        
         plt.figure(figsize = (fig_size, fig_size))
         plt.pcolormesh(u,
                        v,
@@ -83,7 +82,6 @@ class Plot(object):
         cmap = plt.colorbar(shrink=0.8)
         cmap.set_label(r'log|Visibility model| [Jy]', size=10)
         
-        # This impose the convention East of North.  
         plt.xlim(u.max(), u.min())
         plt.ylim(v.max(), v.min())
         
@@ -91,7 +89,7 @@ class Plot(object):
         plt.gca().invert_yaxis()
         plt.show()
     
-    def intensity(self, title= r'I_{Model}', fig_size = 6, vmin = 0, vmax = 4e10,
+    def intensity(self, title= r'$I_{Model}$', fig_size = 6, vmin = 0, vmax = 4e10,
                   phase_shift = True, deproject = False):
         
         Nx, Ny = self._Nx, self._Ny
@@ -108,8 +106,9 @@ class Plot(object):
             vis = geom.apply_phase_shift(-u_grid, -v_grid, vis_)
             I = f2d.transform(vis).real
         
-        x = self._x_model
-        y = self._y_model
+        # The signs are because the convention: East of North.
+        x = -self._x_model
+        y = -self._y_model
         if deproject:
             xd, yd = geom.deproject_xy(x_grid, y_grid)
             x, y = xd, yd
@@ -127,7 +126,6 @@ class Plot(object):
         plt.title(title)
         cmap.set_label(r'I [Jy/sr]', size=10)
         
-        # This impose the convention East of North.  
         plt.xlim(x.max(), x.min())
         plt.ylim(y.max(), y.min())
         
@@ -229,19 +227,11 @@ class Plot(object):
                 vis_f1d = sol.predict_deprojected(q = q)
             else:
                 vis_f1d = sol._vis_map.predict_visibilities(sol.mean, q, q*0, geometry=self._Geometry )
+                
 
-        # rescale total flux
-        def rescale_total_flux(vis, weights):
-            vis = vis / np.cos(geom.inc * deg_to_rad)
-            weights = weights * np.cos(geom.inc * deg_to_rad) ** 2
-            return vis, weights
-
-        vis_model_scaled, weights_scaled = rescale_total_flux(vis_model, weights_input)
-        vis_input, weights_input = rescale_total_flux(vis_input, weights_input)
-
-        q_model_1d, vis_model_1d = self.get_profile(u_model, v_model, vis_model_scaled,
+        q_model_1d, vis_model_1d = self.get_profile(u_model, v_model, vis_model,
                                                     bins = edges,
-                                                    weighted = weighted, weights = weights_scaled)
+                                                    weighted = weighted, weights = weights_input)
 
         # ----------------
         baselines = np.hypot(u_input, v_input)         
@@ -357,7 +347,7 @@ class Plot(object):
             r_f1d = sol.r
 
         r_model_1d, I_model_1d = self.get_profile(x_model, y_model, I, bins = edges)
-        I_model_1d = np.nan_to_num(I_model_1d, nan=0)/np.cos(inc*deg_to_rad)
+        I_model_1d = np.nan_to_num(I_model_1d, nan=0)
         
         plt.figure(figsize=(10,4))
         if clean:

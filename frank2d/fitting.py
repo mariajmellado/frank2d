@@ -371,7 +371,8 @@ class IterativeSolverMethod():
             
             return x, maxiter
 
-    def build_sparse_linear_system(self):
+    
+    def build_sparse_linear_system_(self):
         """
         Create linear system in sparse approach, using sparse matrix storage and linear operators.
         The system to build is:
@@ -429,6 +430,70 @@ class IterativeSolverMethod():
         A_csr = csr_matrix((data_A, indices_A, indptr_A), shape=(N, N))
         A_precond_csr = csr_matrix((data_A_precond, indices_A_precond, indptr_A_precond), shape=(N, N))
 
+        self.set_A(linear_operator(A_csr, (N, N)))
+        self.set_A_precond(linear_operator(A_precond_csr, (N, N)))
+        self.set_b(weights * vis)
+
+    def build_sparse_linear_system(self):
+        """
+        Create linear system in sparse approach, using sparse matrix storage and linear operators.
+        The system to build is:
+                Ax = b
+        Where:
+        A is I + N^{-1} S_{data}.
+        b is (N^{-1} V_{data}).
+        """
+        N = self._vis.shape[0]
+
+        data_A = []
+        indices_A = []
+        indptr_A = [0]
+
+        data_A_precond = []
+        indices_A_precond = []
+        indptr_A_precond = [0]
+
+        data_b = []
+        indices_b = []
+        indptr_b = [0]
+
+        weights = self._weights
+        vis = self._vis
+
+        kernel_mat = self._kernel.sparse_matrix()
+
+        for i in range(N):
+            start, end = kernel_mat.indptr[i], kernel_mat.indptr[i+1]
+
+            non_zero_values = kernel_mat.data[start:end]
+            non_zero_indices = kernel_mat.indices[start:end]
+
+            A_values = non_zero_values * weights[i]
+
+            # A
+            diagonal_pos = np.where((non_zero_indices == i))[0][0]
+            A_values[diagonal_pos] += 1
+            diag_value = A_values[diagonal_pos]
+            
+            data_A.extend(A_values)
+            indices_A.extend(non_zero_indices)
+            indptr_A.append(len(data_A))
+
+            # Preconditioner of A
+            data_A_precond.extend([diag_value**(-1)])
+            indices_A_precond.extend([i])
+            indptr_A_precond.append(len(data_A_precond))
+            
+        data_A = np.array(data_A)
+        indices_A = np.array(indices_A)
+        indptr_A = np.array(indptr_A)
+
+        data_A_precond = np.array(data_A_precond)
+        indices_A_precond = np.array(indices_A_precond)
+        indptr_A_precond = np.array(indptr_A_precond)
+
+        A_csr = csr_matrix((data_A, indices_A, indptr_A), shape=(N, N))
+        A_precond_csr = csr_matrix((data_A_precond, indices_A_precond, indptr_A_precond), shape=(N, N))
         self.set_A(linear_operator(A_csr, (N, N)))
         self.set_A_precond(linear_operator(A_precond_csr, (N, N)))
         self.set_b(weights * vis)

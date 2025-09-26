@@ -686,7 +686,7 @@ class GaussianModel:
 
         # Wendland kernel parameters.
         self.m , self.logc = -2, 8
-        self.logl = 5
+        self.logl = np.log10(7e4)
 
         self.c = 10**self.logc  # Convert logc to c.
         self.l = 10**self.logl
@@ -1116,7 +1116,9 @@ class GaussianModel:
     def log_posterior_emcee(self, params):
         from numpy.linalg import slogdet
 
-        m, logc, logl = params[0], params[1], params[2]
+        #m, logc, logl = params[0], params[1], params[2]
+        m, logc = params[0], params[1]
+        logl = self.logl
 
         c = 10.0**logc
         l = 10.0**logl   # Keep l fixed during emcee optimization.
@@ -1160,82 +1162,76 @@ class GaussianModel:
             # Catch any numerical errors and return -inf log-posterior.
             return -np.inf
 
-    def emcee_optimizer(self):
+    def emcee_optimizer(self, h5_path="chain.h5"):
+        import os
         import emcee
+        base_dir = "/Users/mariajmelladot/Desktop/Frank2D/data/emcee_runs"
 
-        nwalkers = 20
-        ndim = 3
-        burn = 5
-        steps = 10
+        # Construye ruta final
+        # - Si h5_path es absoluto y apunta a archivo, se respeta.
+        # - Si h5_path es una carpeta o viene vacío, se le agrega un nombre.
+        if not h5_path or h5_path.endswith(os.sep):
+            h5_name = "chain.h5"
+            file_path = os.path.join(h5_path, h5_name) if h5_path else os.path.join(base_dir, h5_name)
+        else:
+            file_path = h5_path
+            if not os.path.isabs(file_path):
+                file_path = os.path.join(base_dir, file_path)
+
+        # Asegura el directorio contenedor
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+        nwalkers = 100
+        ndim = 2
+        burn = 100
+        steps = 1000
 
         m_lo, m_hi = self._m_bounds
         c_lo, c_hi = self._logc_bounds
-        l_lo, l_hi = self._logl_bounds
 
-
-        # Fixed slope from previous analysis and reparametrization
-        a = -4.2
-        b = 1.1
-        
-        sm_rep, slogc_rep = 1, 1
-
-        def to_rep(m, logc):
-            logc_rep = (logc - (a*m + b)) / slogc_rep
-            m_rep = m / sm_rep
-            return np.array([m_rep, logc_rep])
-
-        def from_rep(m_rep, logc_rep):
-            m = m_rep * sm_rep
-            logc = a*m + b + logc_rep * slogc_rep
-            return np.array([m, logc])
-
-        # Log-probability in (u,v) space
         def log_prob_rep(params):
-            m_rep, logc_rep, logl = params
-            m, logc = from_rep(m_rep, logc_rep)
-            if not (m_lo <= m <= m_hi and c_lo <= logc <= c_hi and l_lo <= logl <= l_hi):
+            m, logc = params
+            if not (m_lo <= m <= m_hi and c_lo <= logc <= c_hi):
                 return -np.inf
-            return self.log_posterior_emcee([m, logc, logl])
+            return self.log_posterior_emcee([m, logc])
 
-        # Initialize walkers around MAP (transformed)
-        theta_map = np.array([-2, 8, 5.5])
-        center = to_rep(theta_map[0], theta_map[1]), theta_map[2]
-        u, v = to_rep(theta_map[0], theta_map[1])
-        center = np.array([u, v, theta_map[2]])
-        scale = np.array([0.5, 0.5, 0.5])
-        p0_rep = center + np.random.randn(nwalkers, 3) * scale
+        backend = emcee.backends.HDFBackend(file_path, read_only=False)
 
-        # Sampler moves
-        moves = [
-            (emcee.moves.StretchMove(a=1.0), 0.6),
-            (emcee.moves.DEMove(sigma=0.5), 0.4),
-        ]
+        # Decide inicializar o reanudar
+        try:
+            it = backend.iteration  # si el archivo está “crudo” es posible que falle
+            need_init = (it == 0)
+        except Exception:
+            need_init = True
 
-        sampler = emcee.EnsembleSampler(nwalkers, ndim, log_prob_rep, moves=moves)
+        if need_init:
+            center = np.array([-2, 8])
+            scale  = np.array([1, 1])
+            p0 = center + np.random.randn(nwalkers, ndim) * scale
+            backend.reset(nwalkers, ndim)
+            initial_state = p0
+        else:
+            initial_state = None  # reanuda desde el estado del backend
+
+        moves = [(emcee.moves.StretchMove(a=1.0), 0.6)]
+        sampler = emcee.EnsembleSampler(nwalkers, ndim, log_prob_rep, moves=moves, backend=backend)
 
         try:
-            state = sampler.run_mcmc(p0_rep, steps, progress=True, store=True)
-
+            sampler.run_mcmc(initial_state, steps, progress=True, store=True)
         except KeyboardInterrupt:
-            print("Sampling interrupted by user (Ctrl+C). Saving partial results...")
-
+            print("✋ Muestreo interrumpido. Progreso guardado en HDF5.")
         finally:
             self.sampler = sampler
 
-        steps_done = getattr(sampler, "iteration", 0)
-        if steps_done == 0:
-            print("No samples to save (iteration=0). Did sampling start?")
-            return  # o 'raise RuntimeError(...)' dentro de tu método
+        steps_totales = sampler.iteration
+        if steps_totales == 0:
+            print("No hay muestras guardadas.")
+            return
 
-        burn_eff = min(burn, max(steps_done - 1, 0))
+        burn_eff = min(burn, max(steps_totales - 1, 0))
+        flat_samples = sampler.get_chain(discard=burn_eff, flat=True)
+        flat_logp    = sampler.get_log_prob(discard=burn_eff, flat=True)
 
-        flat_rep  = sampler.get_chain(discard=burn_eff, flat=True)
-        flat_logp = sampler.get_log_prob(discard=burn_eff, flat=True)
-
-        flat_samples = np.array([from_rep(mr, cr) for mr, cr in flat_rep[:, :2]])
-        flat_samples = np.hstack([flat_samples, flat_rep[:, 2:3]]) 
-
-        # MAP value
         imax = np.argmax(flat_logp)
         theta_map = flat_samples[imax]
         med = np.median(flat_samples, axis=0)
@@ -1245,8 +1241,9 @@ class GaussianModel:
         self.samples_logp = flat_logp
         self._best = theta_map
 
-        print(f"acceptance ≈ {np.mean(sampler.acceptance_fraction):.3f} | steps={steps_done} | burn={burn_eff}")
+        print(f"acceptance ≈ {np.mean(sampler.acceptance_fraction):.3f} | steps_totales={steps_totales} | burn={burn_eff}")
         print("MAP:", theta_map, " median:", med, " [-, +]:", med-q16, q84-med)
+
 
     def calculate_S_real_space(self, m, c, l):
         #start_time = time.time()

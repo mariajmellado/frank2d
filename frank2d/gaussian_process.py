@@ -2,6 +2,7 @@ import numpy as np
 from .utilities import linear_operator
 from scipy.sparse import csr_matrix
 
+
 """
 This module contains classes for constructing Kernel for the Gaussian Process
 in Frank's 2D algorithm.
@@ -169,7 +170,7 @@ class Wendland(CorrelationMatrix):
         else:
             raise ValueError("k must be 0, 1, or 2.")
 
-    def row(self, i):
+    def row_(self, i):
         """
         Returns the i-th row of the covariance matrix.
         """
@@ -180,8 +181,25 @@ class Wendland(CorrelationMatrix):
         factor[r_normalized > 1] = 0
 
         return amp * factor * self.P_k(r_normalized, self._k)
+
+    def row(self, i, u1=None, v1=None, q1=None):
+        """
+        Returns the i-th row of the covariance matrix.
+        """
+        if u1 is None:
+            u1 = self._uh
+            v1 = self._vh
+            q1 = self._power_spectrum_q1
+
+        amp = np.sqrt(q1 * self.power_spectrum(self._q2[i], self._m, self._c))
+
+        r_normalized = np.sqrt((u1-self._uh2[i])**2 + (v1-self._vh2[i])**2)
+        factor = (1 - r_normalized)**self._j
+        factor[r_normalized > 1] = 0
+
+        return amp * factor * self.P_k(r_normalized, self._k)
     
-    def sparse(self):
+    def sparse_(self):
         """
         Returns the Wendland covariance matrix in sparse CSR format.
         """
@@ -207,7 +225,56 @@ class Wendland(CorrelationMatrix):
         kernel = linear_operator(kernel_csr, size)
 
         return kernel
+
+
+    def sparse_matrix(self):
+        """
+        Returns the Wendland covariance matrix in sparse CSR format.
+        """
+        data = []
+        indices = []
+        indptr = [0]
+
+        if True:
+            from scipy.spatial import KDTree
+
+            tree = KDTree(np.array([self._uh, self._vh]).T)
+            tree2 = KDTree(np.array([self._uh2, self._vh2]).T)
+            ngb = tree2.query_ball_tree(tree, 1.0)
+            
+            for i, ngb_i in enumerate(ngb):
+                row = self.row(i, self._uh[ngb_i], self._vh[ngb_i], self._power_spectrum_q1[ngb_i])
+                data.extend(row)
+                indices.extend(ngb_i)
+                indptr.append(len(data))
+        else:
+
+            for i in range(self._size):
+                row = self.row(i)
+                non_zero_indices = np.nonzero(row)[0]
+                kernel_values = row[non_zero_indices]
+                
+                data.extend(kernel_values)
+                indices.extend(non_zero_indices)
+                indptr.append(len(data))
+
+        data = np.array(data)
+        indices = np.array(indices)
+        indptr = np.array(indptr)
+
+        size = (self._size, self._size2)
+        kernel_csr = csr_matrix((data, indices, indptr), shape=size)
+
+        return kernel_csr
     
+
+
+    def sparse(self):
+        """
+        Returns the Wendland covariance matrix as a sparse linear operator.
+        """
+        size = (self._size, self._size2)
+        return  linear_operator(self.sparse_matrix(), size)
 
 
 

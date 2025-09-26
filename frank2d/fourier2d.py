@@ -191,3 +191,8 @@ class FourierTransform2D(object):
             self._Un_unshifted, self._Vn_unshifted = u, v
 
         return self._Un_unshifted, self._Vn_unshifted
+
+    @property
+    def uv_points(self):
+        """ Collocation points in the frequency plane"""
+        return self._Un, self._Vn
