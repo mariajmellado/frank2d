@@ -1,83 +1,122 @@
-import numpy as np
-from scipy.stats import binned_statistic_2d
-import constants as const
 import cupy as cp
 
-class Gridding_GPU(object):
-    def __init__(self, N, Rmax, FT, Geometry):
-        self._N = N
+class Gridding(object):
+    def __init__(self, Rmax, FT, Geometry):
+        """
+        Class to grid visibilities in a regular grid (CuPy backend).
+        """
         self._Rmax = Rmax
         self._FT =  FT
         self._Geometry = Geometry
 
-    def run(self, u, v, Vis, Weights, type = 'weighted', shift = False, hermitian = True):  
-        
+        self._set_grid = False
+    
+    def set_bins(self, bin_centers_u, bin_centers_v):
+        """
+        Set the bin centers for gridding.
+        Parameters
+        ----------
+        bin_centers_u : 1D array, unit = lambda
+            Frequencies where the bins are centered in u direction.
+        bin_centers_v : 1D array, unit = lambda
+            Frequencies where the bins are centered in v direction.
+        """
+        self._bin_centers_u = bin_centers_u
+        self._bin_centers_v = bin_centers_v
+
+        self._set_grid = True
+
+    def run(self, u, v, Vis, Weights, type='weighted',
+            unshift=False, hermitian=True):
+        """
+        Function to grid visibilities in a regular grid.
+        """
         u_, v_, Vis_ = u, v, Vis
-
-        if self._Geometry._deproject:
-            print("Deprojecting...")
-            u_, v_, Vis_ = self._Geometry.apply_correction(u, v, Vis)
         
-        # Calculating bin edges.
-        bin_centers = self.edges_centers(self._FT._u_shifted)[0]
-        bin_edges_u = self.edges_centers(self._FT._u_shifted)[1]
-        bin_edges_v = self.edges_centers(self._FT._v_shifted)[1]
+        if not self._set_grid:
+            # Calculating bin edges.
+            self._bin_centers_u = self._FT._u_shifted
+            self._bin_centers_v = self._FT._v_shifted
 
+        bin_edges_u = self.edges_centers(self._bin_centers_u)
+        bin_edges_v = self.edges_centers(self._bin_centers_v)
 
         if type == 'weighted':
-            u_gridded, v_gridded, vis_gridded, weights_gridded = self.weighted_gridding(u_, v_, Vis_, Weights,
-                                                                                        bin_centers, bin_edges_u, bin_edges_v,
-                                                                                        shift = shift, hermitian = hermitian)
-
+            u_gridded, v_gridded, vis_gridded, weights_gridded = self.weighted_gridding(
+                u_, v_, Vis_, Weights,
+                bin_edges_u, bin_edges_v,
+                unshift=unshift, hermitian=hermitian
+            )
             return u_gridded, v_gridded, vis_gridded, weights_gridded
 
-    def edges_centers(self, freq):
-        correction = (freq[1] - freq[0])/2
-        
-        # Creating the grid with shifted scheme.
-        bin_centers = freq
-        bin_edges_=  bin_centers - correction
-        bin_edges = cp.concatenate((bin_edges_, cp.array([bin_edges_[-1] + 2 * correction])))
-        return bin_centers, bin_edges
+    def edges_centers(self, bin_centers):
+        """
+        Compute bin edges from shifted bin centers.
+        """
+        correction = cp.abs(bin_centers[1] - bin_centers[0]) / 2
+        bin_edges_ = bin_centers - correction
+        bin_edges = cp.concatenate((bin_edges_, bin_edges_[-1:]+2*correction))
+        return bin_edges
     
-    def weighted_gridding(self, u, v, Vis, Weights, centers, edges_u, edges_v, shift = False, hermitian = True):
-        # Calculating values in grid
-        vis_weights_sum_bin, _, _ = binned_statistic_2d_cupy(u, v, Vis*Weights, 'sum', bins=[edges_u, edges_v], expand_binnumbers = False)
-        weights_sum_bin, _, _ = binned_statistic_2d_cupy(u, v, Weights, 'sum', bins=[edges_u, edges_v], expand_binnumbers = False)
-        vis_gridded_matrix =  vis_weights_sum_bin/weights_sum_bin
-        weights_gridded_matrix, _, _ = binned_statistic_2d_cupy(u, v, Weights, 'sum', bins=[edges_u, edges_v], expand_binnumbers = False)
+    def weighted_gridding(self, u, v, Vis, Weights, edges_u, edges_v,
+                          unshift=False, hermitian=True):
+        """
+        Weighted gridding on a regular (u, v) grid.
+        """
+        # Weighted sums per bin using histogram2d (separating real/imag)
+        vw = Vis * Weights
+        H_w, _, _ = cp.histogram2d(u, v, bins=[edges_u, edges_v], weights=Weights)
+        H_vw_r, _, _ = cp.histogram2d(u, v, bins=[edges_u, edges_v], weights=cp.real(vw))
+        H_vw_i, _, _ = cp.histogram2d(u, v, bins=[edges_u, edges_v], weights=cp.imag(vw))
 
-        # Change Nans by 0 in vis.
-        vis_gridded = cp.nan_to_num(vis_gridded_matrix, nan=0)
-        weights_gridded = cp.nan_to_num(weights_gridded_matrix, nan=0)
+        vis_gridded_matrix = (H_vw_r + 1j * H_vw_i) / H_w
 
-        # Imposing hermitian conjugate property.
+        # Replace NaNs with 0 and transpose to match original orientation
+        vis_gridded = cp.nan_to_num(vis_gridded_matrix, nan=0).T
+        weights_gridded = cp.nan_to_num(H_w, nan=0).T
+
+        # Enforce Hermitian symmetry if requested
         if hermitian:
             vis_gridded, weights_gridded = self.enforce_hermitian_symmetry(vis_gridded, weights_gridded)
-
-        if shift:
-            # Shifting the grid, i.e. spatial frequencies centered in 0.
-            u_gridded, v_gridded, vis_gridded, weights_gridded = self.shiftting(centers, vis_gridded, weights_gridded)
-        else:
+        
+        if unshift == True:
             # Unshifted grid.
-            u_gridded, v_gridded = self._FT._Un, self._FT._Vn # unshifted by default.
-            vis_gridded = cp.fft.fftshift(vis_gridded).flatten()
-            weights_gridded = cp.fft.fftshift(weights_gridded).flatten()
+            print("Unshiftting grid..")
+            vis_gridded = cp.fft.fftshift(vis_gridded).ravel(order="C") 
+            weights_gridded = cp.fft.fftshift(weights_gridded).ravel(order="C") 
+            if self._set_grid == False:
+                u_gridded, v_gridded = self._FT.uv_points_unshifted
+            else:
+                u_, v_ = cp.fft.fftshift(self._bin_centers_u), cp.fft.fftshift(self._bin_centers_v)
+                u_gridded, v_gridded = cp.meshgrid(u_, v_)
+                u_gridded, v_gridded = u_gridded.ravel(order="C"), v_gridded.ravel(order="C")
+        else:
+            # Default grid shifted i.e. spatial frequencies centered in 0.
+            vis_gridded = vis_gridded.ravel(order="C")  
+            weights_gridded = weights_gridded.ravel(order="C")
+            if self._set_grid == False:
+                print("Warning: You are using the default grid from the Fourier Transform object.")
+                u_gridded, v_gridded = self._FT._Un, self._FT._Vn
+            else:
+                u_gridded, v_gridded = cp.meshgrid(self._bin_centers_u, self._bin_centers_v)
+            u_gridded, v_gridded = u_gridded.ravel(order="C"), v_gridded.ravel(order="C")
 
-        # Change Nans by 0 in vis again.
+        # Final NaN cleanup (shouldn't be needed but safe)
         vis_gridded = cp.nan_to_num(vis_gridded, nan=0)
         weights_gridded = cp.nan_to_num(weights_gridded, nan=0)
             
         return u_gridded, v_gridded, vis_gridded, weights_gridded
 
     def enforce_hermitian_symmetry(self, vis, wts):
+        """
+        Enforce Hermitian symmetry on the gridded visibilities.
+        """
+        # Center zero frequency for symmetric indexing
         vis = cp.fft.fftshift(vis)
         wts = cp.fft.fftshift(wts)
         nx, ny = vis.shape
-        cx, cy = (nx // 2), (ny // 2)
 
-        print("Enforcing Hermitian symmetry...")
-        for x in range(nx):  
+        for x in range(nx):
             for y in range(ny):
                 x_sym = (-x) % nx
                 y_sym = (-y) % ny
@@ -88,14 +127,12 @@ class Gridding_GPU(object):
                 w_xy = wts[y, x]
                 w_neg_xy = wts[y_sym, x_sym]
 
-                # Aplicamos hermiticidad si hay al menos un peso válido
-                if w_xy > 0 or w_neg_xy > 0:
+                if (w_xy > 0) or (w_neg_xy > 0):
                     w_tot = w_xy + w_neg_xy
                     if w_tot > 0:
                         val = (cp.conj(v_neg_xy) * w_neg_xy + v_xy * w_xy) / w_tot
                         vis[y, x] = val
                         vis[y_sym, x_sym] = cp.conj(val)
-
                         wts[y, x] = w_tot
                         wts[y_sym, x_sym] = w_tot
 
@@ -104,76 +141,11 @@ class Gridding_GPU(object):
         return vis, wts
 
     def shiftting(self, freqs, vis_matrix, weights_matrix):
-        vis_gridded = vis_matrix.flatten()
-        weights_gridded = weights_matrix.flatten()
-        u_, v_ = cp.meshgrid(freqs, freqs, indexing='ij') 
+        """
+        Shift gridded visibilities to have zero frequency at the center.
+        """
+        vis_gridded = vis_matrix.reshape(-1)
+        weights_gridded = weights_matrix.reshape(-1)
+        u_, v_ = cp.meshgrid(freqs, freqs, indexing='ij')
         u_gridded, v_gridded = u_.reshape(-1), v_.reshape(-1)
         return u_gridded, v_gridded, vis_gridded, weights_gridded
-        
-def binned_statistic_2d_cupy(x, y, values, statistic='mean', bins=10, range=None, expand_binnumbers=False):
-    if isinstance(bins, (list, tuple)) and len(bins) == 2:
-        x_edges, y_edges = cp.asarray(bins[0]), cp.asarray(bins[1])
-        bins_x, bins_y = len(x_edges) - 1, len(y_edges) - 1
-    else:
-        bins_x = bins_y = bins
-        hist, x_edges, y_edges = cp.histogram2d(x, y, bins=bins, range=range)
-
-    x_bin = cp.digitize(x, x_edges) - 1
-    y_bin = cp.digitize(y, y_edges) - 1
-    valid = (x_bin >= 0) & (x_bin < bins_x) & (y_bin >= 0) & (y_bin < bins_y)
-    x_bin, y_bin, values = x_bin[valid], y_bin[valid], values[valid]
-    bin_idx = (x_bin * bins_y + y_bin).astype(cp.int32)
-
-    if statistic == 'count':
-        counts = cp.zeros(bins_x * bins_y, dtype=cp.float32)
-        cp.ElementwiseKernel(
-            'int32 idx',
-            'raw float32 out',
-            'atomicAdd(&out[idx], 1.0f)',
-            'bincount_count_kernel'
-        )(bin_idx, counts)
-        bin_stat = counts.reshape(bins_x, bins_y)
-
-    else:
-        # Prealocation of output arrays.
-        real_out = cp.zeros(bins_x * bins_y, dtype=cp.float32)
-        cp.ElementwiseKernel(
-            'int32 idx, float32 val',
-            'raw float32 out',
-            'atomicAdd(&out[idx], val)',
-            'bincount_real_kernel'
-        )(bin_idx, cp.real(values).astype(cp.float32), real_out)
-        real_vals = real_out.reshape(bins_x, bins_y)
-
-        if cp.iscomplexobj(values):
-            imag_out = cp.zeros(bins_x * bins_y, dtype=cp.float32)
-            cp.ElementwiseKernel(
-                'int32 idx, float32 val',
-                'raw float32 out',
-                'atomicAdd(&out[idx], val)',
-                'bincount_imag_kernel'
-            )(bin_idx, cp.imag(values).astype(cp.float32), imag_out)
-            imag_vals = imag_out.reshape(bins_x, bins_y)
-            sum_vals = real_vals + 1j * imag_vals
-        else:
-            sum_vals = real_vals
-
-        if statistic == 'sum':
-            bin_stat = sum_vals
-        elif statistic == 'mean':
-            count_out = cp.zeros(bins_x * bins_y, dtype=cp.float32)
-            cp.ElementwiseKernel(
-                'int32 idx',
-                'raw float32 out',
-                'atomicAdd(&out[idx], 1.0f)',
-                'bincount_count_kernel'
-            )(bin_idx, count_out)
-            count_vals = count_out.reshape(bins_x, bins_y)
-            bin_stat = cp.divide(sum_vals, count_vals, where=(count_vals > 0))
-        else:
-            raise ValueError(f"Unsupported statistic: {statistic}")
-
-    if expand_binnumbers:
-        return bin_stat, x_edges, y_edges, (x_bin, y_bin)
-
-    return bin_stat, x_edges, y_edges
