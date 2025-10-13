@@ -90,7 +90,7 @@ class Plot(object):
         plt.ylabel(r'v [1e6 $\lambda$]')
         plt.title(title)
         cmap = plt.colorbar(shrink=0.8)
-        cmap.set_label(r'log|$V_{model}$| [Jy]', size=10)
+        cmap.set_label(r'log|V| [Jy]', size=10)
         
         plt.xlim(u.max(), u.min())
         plt.ylim(v.max(), v.min())
@@ -130,8 +130,8 @@ class Plot(object):
                        I,
                        cmap="magma",
                        norm=norm)
-        plt.xlabel(r'x ["]')
-        plt.ylabel(r'y ["]')
+        plt.xlabel(r'RA ["]')
+        plt.ylabel(r'Dec ["]')
         cmap = plt.colorbar(shrink=0.8)
         plt.title(title)
         cmap.set_label(r'I [Jy/sr]', size=10)

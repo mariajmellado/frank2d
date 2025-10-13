@@ -683,8 +683,6 @@ class GaussianModel:
             If None, use the current values of the class.
         """
 
-        start_time = time.time()
-
         if param is not None:
             m = param['m']
             c = 10**param['logc']
@@ -729,9 +727,6 @@ class GaussianModel:
 
         log_posterior =  (prior - 0.5*self._logdetS + 0.5*self._logdetD + 0.5*self._jDj)
         minus_log_posterior = - log_posterior
-
-        end_time = time.time()
-        print(f" + Total time to evaluate the posterior: {end_time - start_time:.2f} seconds")
 
         return minus_log_posterior
 
