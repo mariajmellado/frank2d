@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 
 
 class Gridding(object):
-    def __init__(self, N, Rmax, FT, Geometry):
+    def __init__(self, Rmax, FT, Geometry):
         """
         Class to grid visibilities in a regular grid.
         Parameters
@@ -18,10 +18,26 @@ class Gridding(object):
         Geometry : Geometry object
             Object that contains the geometry parameters.
         """
-        self._N = N
         self._Rmax = Rmax
         self._FT =  FT
         self._Geometry = Geometry
+
+        self._set_grid = False
+    
+    def set_bins(self, bin_centers_u, bin_centers_v):
+        """
+        Set the bin centers for gridding.
+        Parameters
+        ----------
+        bin_centers_u : 1D array, unit = lambda
+            Frequencies where the bins are centered in u direction.
+        bin_centers_v : 1D array, unit = lambda
+            Frequencies where the bins are centered in v direction.
+        """
+        self._bin_centers_u = bin_centers_u
+        self._bin_centers_v = bin_centers_v
+
+        self._set_grid = True
 
     def run(self, u, v, Vis, Weights, type = 'weighted',
             unshift = False, hermitian = True):  
@@ -56,22 +72,25 @@ class Gridding(object):
         """
         u_, v_, Vis_ = u, v, Vis
         
-        # Calculating bin edges.
-        bin_centers_u = self._FT._u_shifted
-        bin_centers_v = self._FT._v_shifted
-        bin_edges_u = self.edges_centers(bin_centers_u)
-        bin_edges_v = self.edges_centers(bin_centers_v)
+        if not self._set_grid:
+            # Calculating bin edges.
+            self._bin_centers_u = self._FT._u_shifted
+            self._bin_centers_v = self._FT._v_shifted
+
+        bin_edges_u = self.edges_centers(self._bin_centers_u)
+        bin_edges_v = self.edges_centers(self._bin_centers_v)
 
         if type == 'weighted':
             u_gridded, v_gridded, vis_gridded, weights_gridded = self.weighted_gridding(u_, v_, Vis_, Weights,
                                                                                         bin_edges_u, bin_edges_v,
-                                                                                        unshift = unshift, hermitian = hermitian)
+                                                                                        unshift = unshift,
+                                                                                        hermitian = hermitian)
 
             return u_gridded, v_gridded, vis_gridded, weights_gridded
 
     def edges_centers(self, bin_centers):
         """
-        Function to calculate the edges and centers of the bins for gridding
+        Function to calculate the edges of the bins for gridding
         with the uv-plane shifted.
         Parameters
         ----------
@@ -140,15 +159,24 @@ class Gridding(object):
         if unshift == True:
             # Unshifted grid.
             print("Unshiftting grid..")
-            u_gridded, v_gridded = self._FT.uv_points_unshifted
             vis_gridded = np.fft.fftshift(vis_gridded).ravel(order="C") 
             weights_gridded = np.fft.fftshift(weights_gridded).ravel(order="C") 
+            if self._set_grid == False:
+                u_gridded, v_gridded = self._FT.uv_points_unshifted
+            else:
+                u_, v_ = np.fft.fftshift(self._bin_centers_u), np.fft.fftshift(self._bin_centers_v)
+                u_gridded, v_gridded = np.meshgrid(u_, v_)
+                u_gridded, v_gridded = u_gridded.ravel(order="C"), v_gridded.ravel(order="C")
         else:
             # Default grid shifted i.e. spatial frequencies centered in 0.
             vis_gridded = vis_gridded.ravel(order="C")  
             weights_gridded = weights_gridded.ravel(order="C")
-            u_gridded, v_gridded = self._FT._Un, self._FT._Vn
-            print("Shifted grid..")
+            if self._set_grid == False:
+                print("Warning: You are using the default grid from the Fourier Transform object.")
+                u_gridded, v_gridded = self._FT._Un, self._FT._Vn
+            else:
+                u_gridded, v_gridded = np.meshgrid(self._bin_centers_u, self._bin_centers_v)
+            u_gridded, v_gridded = u_gridded.ravel(order="C"), v_gridded.ravel(order="C")
 
         # Change Nans by 0 in vis again.
         vis_gridded = np.nan_to_num(vis_gridded, nan=0)

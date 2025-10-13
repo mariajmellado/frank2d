@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.sparse.linalg import LinearOperator
-from scipy.sparse import csr_matrix
+import scipy.sparse as cxs
 from scipy.sparse.linalg._isolve.utils import make_system
 import matplotlib.pyplot as plt
 import time
@@ -371,69 +371,6 @@ class IterativeSolverMethod():
             
             return x, maxiter
 
-    
-    def build_sparse_linear_system_(self):
-        """
-        Create linear system in sparse approach, using sparse matrix storage and linear operators.
-        The system to build is:
-                Ax = b
-        Where:
-        A is I + N^{-1} S_{data}.
-        b is (N^{-1} V_{data}).
-        """
-        N = self._vis.shape[0]
-
-        data_A = []
-        indices_A = []
-        indptr_A = [0]
-
-        data_A_precond = []
-        indices_A_precond = []
-        indptr_A_precond = [0]
-
-        data_b = []
-        indices_b = []
-        indptr_b = [0]
-
-        weights = self._weights
-        vis = self._vis
-
-        for i in range(N):  
-            row = self._kernel.row(i)
-
-            non_zero_indices = np.nonzero(row)[0]
-            non_zero_values = row[non_zero_indices]
-            A_values = non_zero_values * weights[i]
-
-            # A
-            diagonal_pos = np.where((non_zero_indices == i))[0][0]
-            A_values[diagonal_pos] += 1
-            diag_value = A_values[diagonal_pos]
-            
-            data_A.extend(A_values)
-            indices_A.extend(non_zero_indices)
-            indptr_A.append(len(data_A))
-
-            # Preconditioner of A
-            data_A_precond.extend([diag_value**(-1)])
-            indices_A_precond.extend([i])
-            indptr_A_precond.append(len(data_A_precond))
-            
-        data_A = np.array(data_A)
-        indices_A = np.array(indices_A)
-        indptr_A = np.array(indptr_A)
-
-        data_A_precond = np.array(data_A_precond)
-        indices_A_precond = np.array(indices_A_precond)
-        indptr_A_precond = np.array(indptr_A_precond)
-
-        A_csr = csr_matrix((data_A, indices_A, indptr_A), shape=(N, N))
-        A_precond_csr = csr_matrix((data_A_precond, indices_A_precond, indptr_A_precond), shape=(N, N))
-
-        self.set_A(linear_operator(A_csr, (N, N)))
-        self.set_A_precond(linear_operator(A_precond_csr, (N, N)))
-        self.set_b(weights * vis)
-
     def build_sparse_linear_system(self):
         """
         Create linear system in sparse approach, using sparse matrix storage and linear operators.
@@ -443,60 +380,35 @@ class IterativeSolverMethod():
         A is I + N^{-1} S_{data}.
         b is (N^{-1} V_{data}).
         """
-        N = self._vis.shape[0]
-
-        data_A = []
-        indices_A = []
-        indptr_A = [0]
-
-        data_A_precond = []
-        indices_A_precond = []
-        indptr_A_precond = [0]
-
-        data_b = []
-        indices_b = []
-        indptr_b = [0]
-
         weights = self._weights
         vis = self._vis
 
-        kernel_mat = self._kernel.sparse_matrix()
+        start_time = time.time()
+        kernel_csr = self._kernel.sparse_matrix()
+        end_time = time.time()
+        execution_time = end_time - start_time
+        print(f'--> time kernel = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
 
-        for i in range(N):
-            start, end = kernel_mat.indptr[i], kernel_mat.indptr[i+1]
+        N = kernel_csr.shape[0]
 
-            non_zero_values = kernel_mat.data[start:end]
-            non_zero_indices = kernel_mat.indices[start:end]
+        # Scaling with Hadamard product.
+        A = kernel_csr.multiply(weights[:, None])
+        A = A + cxs.eye(N, dtype=A.dtype, format="csr")
 
-            A_values = non_zero_values * weights[i]
+        A.sum_duplicates()
+        A.sort_indices()
 
-            # A
-            diagonal_pos = np.where((non_zero_indices == i))[0][0]
-            A_values[diagonal_pos] += 1
-            diag_value = A_values[diagonal_pos]
-            
-            data_A.extend(A_values)
-            indices_A.extend(non_zero_indices)
-            indptr_A.append(len(data_A))
+        # Preconditioner matrix M = diag(A)^{-1}.
+        diagA = A.diagonal()
+        M = cxs.csr_matrix((1.0/diagA, np.arange(N), np.arange(N+1)), shape=(N, N))
 
-            # Preconditioner of A
-            data_A_precond.extend([diag_value**(-1)])
-            indices_A_precond.extend([i])
-            indptr_A_precond.append(len(data_A_precond))
-            
-        data_A = np.array(data_A)
-        indices_A = np.array(indices_A)
-        indptr_A = np.array(indptr_A)
+        b = weights * vis
 
-        data_A_precond = np.array(data_A_precond)
-        indices_A_precond = np.array(indices_A_precond)
-        indptr_A_precond = np.array(indptr_A_precond)
+        # Convert to linear operators.
+        self.set_A(linear_operator(A, A.shape))
+        self.set_A_precond(linear_operator(M, M.shape))
+        self.set_b(b)
 
-        A_csr = csr_matrix((data_A, indices_A, indptr_A), shape=(N, N))
-        A_precond_csr = csr_matrix((data_A_precond, indices_A_precond, indptr_A_precond), shape=(N, N))
-        self.set_A(linear_operator(A_csr, (N, N)))
-        self.set_A_precond(linear_operator(A_precond_csr, (N, N)))
-        self.set_b(weights * vis)
 
     def plot_tolerance(self, iteration, tols):
         iterations = np.arange(1, iteration + 2)
@@ -513,6 +425,27 @@ class IterativeSolverMethod():
         plt.xlabel('iterations')
         plt.ylabel('log tolerance')
         plt.show()
+    
+    def solve_linear_system(self, solver):
+        """
+        Solve the linear system using the specified iterative solver method.
+        Parameters
+        ----------
+        solver : function
+            The iterative solver method to use.
+        """
+
+        if self._x0 is None:
+            x, info = solver( self._A, self._b, M = self._A_precond,
+                              rtol = self._rtol, maxiter = self._maxiter
+                            )
+        else:
+            x, info = solver( self._A, self._b, M = self._A_precond,
+                              x0 = self._x0,
+                              rtol = self._rtol, maxiter = self._maxiter
+                            )
+
+        self._res_linear_system = x, info
 
     def run(self):
         """
@@ -537,34 +470,37 @@ class IterativeSolverMethod():
             The solution vector (V*). Unit = Jy.
         """
         # Create the linear system.
-        start_time = time.time()
         print("Creating sparse linear system...")
+        start_time = time.time()
+
         self.build_sparse_linear_system()
+
         end_time = time.time()
         execution_time = end_time - start_time
         print(f'--> time = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
-
-        solver = self.get_method()
 
         # Solve the linear system.
-        start_time = time.time()
         print("Solving linear system...")
-        if self._x0 is None:
-            x, info = solver(self._A, self._b, M = self._A_precond, rtol = self._rtol, maxiter = self._maxiter)
-        else:
-            x, info = solver(self._A, self._b, M = self._A_precond, x0 = self._x0, rtol = self._rtol, maxiter = self._maxiter)
+        start_time = time.time()
+
+        solver = self.get_method()
+        self.solve_linear_system(solver)
+
         end_time = time.time()
         execution_time = end_time - start_time
         print(f'--> time = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
+
+        x, info = self._res_linear_system
 
         # Report on the success of the fitting.
         fit_correctly = np.allclose(self._A.matvec(x), self._b)
-        print("-> CGM converged?  ", info == 0)
-        print("-> Fit correctly?  ", fit_correctly)
+        print("               ---> CGM converged?  ", info == 0)
+        print("                    ---> Fit correctly?  ", bool(fit_correctly))
         if fit_correctly:
-            print("!!!!  Sucess  !!!!")
+            print("                     !!!!  Sucess..  !!!!")
 
         self._solution = x
+
         return x
 
     @property
@@ -572,4 +508,4 @@ class IterativeSolverMethod():
         """
         Returns the solution of the linear system.
         """
-        return self._sol
+        return self._solution

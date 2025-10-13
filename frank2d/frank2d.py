@@ -4,6 +4,7 @@ from .geometry import Geometry
 from .preprocess_vis import Gridding
 from .fitting import IterativeSolverMethod
 from .gaussian_process import SquaredExponential, Wendland
+from .posterior_optimization import MAPEstimator
 
 from frank.radial_fitters import FrankFitter
 from frank.geometry import SourceGeometry
@@ -39,17 +40,20 @@ class Frank2D(object):
         self._Geometry = geom
         self._FT = FourierTransform2D(self._Rmax, self._N, self._Geometry)
 
+        ###### DELETE LATER ######
         self._gridded_data = None
         self._gridded_data_postprocess = None
         self._kernel_info = None
         self._x0 = None
         self._solver = None
         self._linear_system = None
+        ###### DELETE LATER ######
 
         self._set_guess = False
         self._set_kernel = False
         self._set_gridded_data = False
         self._set_fit_method = False
+        self._set_MAP_estimator = False
 
         self._sol_visibility = None
         self._sol_intensity = None
@@ -179,27 +183,51 @@ class Frank2D(object):
 
         self._set_gridded_data = True
 
-    def process_vis(self, u, v, Vis, Weights, hermitian = True):
+    def set_MAP_estimator(self, MAP_estimator):
+        """
+        Setter of the MAP estimator.
+        Parameters:
+        -----------
+        MAP_estimator : MAPEstimator object
+            MAPEstimator object containing the method to compute the MAP.
+        """
+        print("Setting MAP estimator...")
+
+        if isinstance(MAP_estimator, MAPEstimator) is False:
+            raise ValueError("MAP_estimator must be an instance of MAPEstimator class.")
+    
+        self._MAP_estimator = MAP_estimator
+        self._set_MAP_estimator = True
+
+    def process_vis(self, data, hermitian = True):
         """
         Process the visibility data by gridding and dividing weighted data and non-weighted data.
         Parameters:
         -----------
-        u : 1D array, size relative to UV table, unit: lambda
-            u coordinates of the visibility data.
-        v : 1D array, size relative to UV table, unit: lambda
-            v coordinates of the visibility data.
-        Vis : 1D array, size relative to UV table, unit: Jy
-            Visibility data.
-        Weights : 1D array, size relative to UV table, unit: 1/Jy^2
-            Weights of the visibility data.
+        data : dict
+            Dictionary containing 'u', 'v', 'vis' and 'weights' keys.
+            u : 1D array, size relative to UV table, unit: lambda
+                u coordinates of the visibility data.
+            v : 1D array, size relative to UV table, unit: lambda
+                v coordinates of the visibility data.
+            Vis : 1D array, size relative to UV table, unit: Jy
+                Visibility data.
+            Weights : 1D array, size relative to UV table, unit: 1/Jy^2
+                Weights of the visibility data.
         hermitian : bool
             Whether to enforce Hermitian symmetry.
-
         Returns:
         None
         """
         if not self._set_gridded_data:
-            grid = Gridding(self._N, self._Rmax, self._FT, self._Geometry)
+            grid = Gridding(self._Rmax, self._FT, self._Geometry)
+            try:
+                u = data["u"]
+                v = data["v"]
+                Vis = data["vis"]
+                Weights = data["weights"]
+            except KeyError:
+                raise ValueError("data dictionary must contain 'u', 'v', 'vis' and 'weights' keys.")
             u_gridded, v_gridded, vis_gridded, weights_gridded = grid.run(u, v, Vis, Weights,
                                                                           hermitian = hermitian)
             self.set_gridded_data(u_gridded, v_gridded, vis_gridded, weights_gridded)
@@ -283,22 +311,24 @@ class Frank2D(object):
 
         return V_full
 
-    def fit(self, u = None, v = None, Vis = None, Weights = None,
+    def fit(self, data = None,
             type_kernel = 'Wendland', kernel_params = {'m': -2, 'c': 1e8, 'l': 5e4},
             method = 'bicgstab', x0 = None, maxiter = 50000, rtol = 1e-9,
-            hermitian = True):
+            hermitian = True, run_from_scratch = True):
         """
         Fit the visibility data using Gaussian Processes.
         Parameters:
         -----------
-        u : 1D array, unit: lambda
-            u coordinates of the visibility data.
-        v : 1D array, unit: lambda
-            v coordinates of the visibility data.
-        Vis : 1D array,  unit: Jy
-            Visibility data.
-        Weights : 1D array, unit: 1/Jy^2
-            Weights of the visibility data.
+        data : dict
+            Dictionary containing 'u', 'v', 'vis' and 'weights' keys.
+            u : 1D array, unit: lambda
+                u coordinates of the visibility data.
+            v : 1D array, unit: lambda
+                v coordinates of the visibility data.
+            Vis : 1D array,  unit: Jy
+                Visibility data.
+            Weights : 1D array, unit: 1/Jy^2
+                Weights of the visibility data.
         type_kernel : str
             Type of kernel to use ('SquareExponential' or 'Wendland').
         kernel_params : dict
@@ -314,12 +344,26 @@ class Frank2D(object):
             Relative tolerance for the iterative solver.
         hermitian : bool
             Whether to enforce Hermitian symmetry.
+        run_from_scratch : bool
+            Whether to run the fit from scratch (resetting all previous settings),
+            i.e., running from after gridding.
         """
-
         if not self._set_gridded_data:
-            if (u is None) or (v is None) or (Vis is None) or (Weights is None):
+            if not data: # empty dict.
                 raise ValueError("If gridded data is not set, u, v, Vis and Weights must be provided.")
-            self.process_vis(u, v, Vis, Weights, hermitian = hermitian)
+            try:
+                u = data["u"]
+                v = data["v"]
+                Vis = data["vis"]
+                Weights = data["weights"]
+            except KeyError:
+                raise ValueError("data dictionary must contain 'u', 'v', 'vis' and 'weights' keys.")
+            self.process_vis(data, hermitian = hermitian)
+
+        if run_from_scratch:
+            self._set_guess = False
+            self._set_kernel = False
+            self._set_fit_method = False
 
         if not self._set_guess:
             self.set_guess(x0)
@@ -329,26 +373,40 @@ class Frank2D(object):
 
         if not self._set_fit_method:
             self.set_fit_method(method, x0, maxiter, rtol)
-
-        self._sol_visibility_weighted = self._solver.run()
+            
+        self._solver.run()
+        self._sol_visibility_weighted = self._solver.sol
         self._sol_visibility = self.build_full_visibility_model()
 
         self._sol_intensity = self.transform(self._sol_visibility)
 
+    def search_MAP( self, u = None, v = None, Vis = None, Weights = None,
+                    initial_guess = {'m': -2, 'logl': 4},
+                    N = 50):
+        if not self._set_gridded_data:
+            if (u is None) or (v is None) or (Vis is None) or (Weights is None):
+                raise ValueError("If gridded data is not set, u, v, Vis and Weights must be provided.")
+            self.process_vis(u, v, Vis, Weights, hermitian = True)
+
+        if not self._set_MAP_estimator:
+            self._MAP_estimator = MAPEstimator(self._Rmax*rad_to_arcsec, self._Geometry, N = N)
+        
+        self._MAP_estimator.optimize(self._gridded_data, initial_guess)
+
+        self._MAP = self._MAP_estimator.MAP
+
     def transform(self, vis, direction = "backward"):
         return self._FT.fast_transform(vis, direction = direction)
 
-    def frank1d(self, u = None, v = None, vis= None, weights = None, alpha = 1.3, w_smooth = 1e-3, n_pts = 300):
+    def frank1d(self, data = None,
+                alpha = 1.05, w_smooth = 1e-3, n_pts = 300,
+                rout = None, geom = None):
         """
         Perform a 1D Frank fit on the visibility data.
         Parameters:
         -----------
-        u : 1D array, unit: lambda
-            u coordinates of the visibility data.
-        v : 1D array, unit: lambda
-            v coordinates of the visibility data.
-        Vis : 1D array, unit: Jy
-            Visibility data.
+        data : dict, optional
+            Dictionary containing 'u', 'v', 'vis' and 'weights' keys.
         Weights : 1D array, unit: 1/Jy^2
             Weights of the visibility data.
         alpha : float
@@ -357,33 +415,41 @@ class Frank2D(object):
             Smoothing weight hyperparameter for Frank.
         n_pts : int
             Number of radial points for Frank.
+        rout : float
+            Maximum radius for Frank in arcseconds.
+        geom : Geometry object
+            Geometry object containing source geometry parameters.
 
         Returns:
         --------
         vis_fit_1d : 1D array, unit: Jy
             Fitted visibility data using 1D Frank.
         """
-        print("Performing 1D Frank fit...")
-        geom = self._Geometry
+        print('Performing 1D Frank fit...' + '\n')
+        print(r'$\alpha$ = ', str(alpha), r' and $w_{smooth}$ = ', str(w_smooth) + '\n')
+        print( 'N = ', str(n_pts), r' and $R_{max}$ = ', str(rout))
+        if geom is None:
+            geom = self._Geometry
         inc, pa, dra, ddec = geom._inc, geom._pa, geom._dra, geom._ddec
-        Rout = self._Rmax*rad_to_arcsec
+        if rout is None:
+            rout = self._Rmax*rad_to_arcsec
         geom_f1d = SourceGeometry(inc= inc, PA= pa, dRA= dra, dDec= ddec)
-        FF = FrankFitter(Rout, n_pts, geom_f1d, alpha = alpha, weights_smooth = w_smooth)
+        FF = FrankFitter(rout, n_pts, geom_f1d, alpha = alpha, weights_smooth = w_smooth)
 
-        if  u is None or v is None or vis is None or weights is None:
+        if  data is None:
             if not self._set_gridded_data:
-                self.preprocess_vis(u, v, Vis, Weights, hermitian = True)
-            u_gridded, v_gridded = self._gridded_data["u"], self._gridded_data["v"]
-            vis_gridded = self._gridded_data["vis"]
-            weights_gridded = self._gridded_data["weights"]
+                self.preprocess_vis(u, v, Vis, Weights)
+            u, v = self._gridded_data["u"], self._gridded_data["v"]
+            vis = self._gridded_data["vis"]
+            weights = self._gridded_data["weights"]
         else:
-            u_gridded, v_gridded = u, v
-            vis_gridded = vis
-            weights_gridded = weights
+            u, v = data["u"], data["v"]
+            vis = data["vis"]
+            weights = data["weights"]
 
-        sol = FF.fit(u_gridded, v_gridded, vis_gridded, weights_gridded)
+        self._sol_f1d = FF.fit(u, v, vis, weights)
 
-        return sol
+        return self._sol_f1d
     
     @property
     def gridded_data(self):
@@ -444,3 +510,39 @@ class Frank2D(object):
     def intensity_model(self):
         """ 2D intensity model in Jy/sr """
         return self._sol_intensity.reshape((self._Nx, self._Ny), order='C').real
+    
+    @property
+    def FT(self):
+        """ FourierTransform2D object."""
+        return self._FT
+
+    @property
+    def Geometry(self):
+        """ Geometry object."""
+        return self._Geometry
+
+    @property
+    def MAPEstimator(self):
+        """ MAPEstimator object."""
+        if self._MAP_estimator is None:
+            raise ValueError("No MAP estimator found. Run MAP_search first.")
+        return self._MAP_estimator
+    
+    @property
+    def MAP(self):
+        """ Maximum A Posteriori params"""
+        if self._MAP is None:
+            raise ValueError("No MAP found. Run MAP_search first.")
+        return self._MAP
+    
+    @property
+    def N(self):
+        """ Number of collocation points in each dimension."""
+        return self._N
+
+    @property
+    def sol_f1d(self):
+        """ 1D Frank solution."""
+        if self._sol_f1d is None:
+            raise ValueError("No 1D Frank solution found. Run frank1d first.")
+        return self._sol_f1d

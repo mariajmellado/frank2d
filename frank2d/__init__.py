@@ -7,6 +7,8 @@ from .gaussian_process import SquaredExponential, Wendland
 from .frank2d import Frank2D
 from .plot import Plot
 from .utilities import linear_operator
+from .minimizer import Powell
+from .posterior_optimization import MAPEstimator
 
 
 __all__ = [
@@ -16,4 +18,5 @@ __all__ = [
     "Gridding",
     "IterativeSolverMethod",
     "FourierTransform2D",
+    "MAPEstimator",
 ]

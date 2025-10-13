@@ -12,16 +12,17 @@ from frank.utilities import convolve_profile
 from astropy.io import fits
 from gofish import imagecube
 
+from frank2d.posterior_optimization import MAPEstimator
+
 """
 This module contains classes for plotting the results of Frank's 2D algorithm.
 """
 
 class Plot(object):
     def __init__(self, Frank2D, Geometry):
-        self._frank2d = Frank2D
+        self._Frank2D = Frank2D
         self._Geometry = Geometry
         self._FT = Frank2D._FT
-        
         self._Nx = self._Ny = Frank2D._N
         
         self._u_input = Frank2D._gridded_data['u']
@@ -29,17 +30,23 @@ class Plot(object):
         self._vis_input = Frank2D._gridded_data['vis']
         self._weights_input = Frank2D._gridded_data['weights']
 
-        self._u_model = self._frank2d.u_grid
-        self._v_model = self._frank2d.v_grid
-        self._u_model_1d = self._frank2d.u
-        self._v_model_1d = self._frank2d.v
+        self._u_model = self._Frank2D.u_grid
+        self._v_model = self._Frank2D.v_grid
+        self._u_model_1d = self._Frank2D.u
+        self._v_model_1d = self._Frank2D.v
         self._vis_model = Frank2D.visibility_model
 
-        self._x_model = self._frank2d.x_grid*rad_to_arcsec
-        self._y_model = self._frank2d.y_grid*rad_to_arcsec
-        self._x_model_1d = self._frank2d.x*rad_to_arcsec
-        self._y_model_1d = self._frank2d.y*rad_to_arcsec
+        self._x_model = self._Frank2D.x_grid*rad_to_arcsec
+        self._y_model = self._Frank2D.y_grid*rad_to_arcsec
+        self._x_model_1d = self._Frank2D.x*rad_to_arcsec
+        self._y_model_1d = self._Frank2D.y*rad_to_arcsec
         self._int_model = Frank2D.intensity_model.real
+
+        self._int_model_shifted = None
+
+        self._f1d_profile = None
+        self._MAP_estimator = None
+        self._fits_file = None
 
         self._Rmax = Frank2D.Rmax
         
@@ -53,16 +60,19 @@ class Plot(object):
         vis = None
 
         if kind == 'input':
-            vis = self._vis_input
+            vis = self._vis_input.reshape((Ny, Nx), order='C')
+            u = self._u_input.reshape((Ny, Nx), order='C')
+            v = self._v_input.reshape((Ny, Nx), order='C')
         elif kind == 'model':
             vis = self._vis_model
+            u, v = self._u_model, self._v_model
         else:
             raise ValueError("type must be 'input' or 'model'")
-
+        
         # Shifted already.
         # The signs are because convention: East of North.
-        u = -self._u_model #(N, N)
-        v = -self._v_model
+        u = -u
+        v = -v
         if phase_shift:
             vis = geom.apply_phase_shift(u, v, vis)
         
@@ -80,7 +90,7 @@ class Plot(object):
         plt.ylabel(r'v [1e6 $\lambda$]')
         plt.title(title)
         cmap = plt.colorbar(shrink=0.8)
-        cmap.set_label(r'log|Visibility model| [Jy]', size=10)
+        cmap.set_label(r'log|$V_{model}$| [Jy]', size=10)
         
         plt.xlim(u.max(), u.min())
         plt.ylim(v.max(), v.min())
@@ -89,11 +99,11 @@ class Plot(object):
         plt.gca().invert_yaxis()
         plt.show()
     
-    def intensity(self, title= r'$I_{Model}$', fig_size = 6, vmin = 0, vmax = 4e10,
+    def intensity(self, title= r'$I_{Model}$', fig_size = 6, vmin = 0, vmax = 4e10, gamma = 0.45,
                   phase_shift = True, deproject = False):
         
         Nx, Ny = self._Nx, self._Ny
-        f2d = self._frank2d
+        f2d = self._Frank2D
         geom = self._Geometry
         
         I = self._int_model
@@ -110,11 +120,11 @@ class Plot(object):
         x = -self._x_model
         y = -self._y_model
         if deproject:
-            xd, yd = geom.deproject_xy(x_grid, y_grid)
+            xd, yd = geom.deproject_xy(x, y)
             x, y = xd, yd
             
         plt.figure(figsize = (fig_size, fig_size))
-        norm = colors.PowerNorm(gamma=0.45, vmin=0, vmax=4e10)
+        norm = colors.PowerNorm(gamma = gamma, vmin = vmin, vmax = vmax)
         plt.pcolormesh(x,
                        y,
                        I,
@@ -133,29 +143,31 @@ class Plot(object):
         plt.gca().invert_yaxis()
         plt.show()
 
-    def get_profile(self, u, v, vis, bins, weighted = False, weights = None):
+    def get_profile(self, x1, x2, f, bins, weighted = False, weights = None, fit_1d = False):
         from scipy.stats import binned_statistic
         
-        q = np.hypot(u, v)
+        if not fit_1d:
+            r = np.hypot(x1, x2)
+            r = r.ravel(order = 'C')
+            f = f.ravel(order = 'C')
+        else:
+            r = x1
 
-        q = q.ravel(order = 'C')
-        vis = vis.ravel(order = 'C')
-        
         if weighted:
             if weights is None:
                 raise ValueError("Add weights.")
             weights_gridded = self._weights_input
-            Vis_Weights_binned, bin_edges, _ = binned_statistic(q, vis*weights_gridded, 'sum', bins = bins)
-            Weights_binned, bin_edges, _ = binned_statistic(q, weights_gridded, 'sum', bins = bins)
+            F_W_binned, bin_edges, _ = binned_statistic(r, f*weights_gridded, 'sum', bins = bins)
+            Weights_binned, bin_edges, _ = binned_statistic(r, weights_gridded, 'sum', bins = bins)
 
-            vis_1d = np.nan_to_num(Vis_Weights_binned, nan=0)
-            vis_1d = vis_1d/Weights_binned
+            f_1d = np.nan_to_num(F_W_binned, nan=0)
+            f_1d = f_1d/Weights_binned
         else:
-            vis_1d, bin_edges, _ = binned_statistic(q, vis, 'mean', bins = bins)
+            f_1d, bin_edges, _ = binned_statistic(r, f, 'mean', bins = bins)
         
-        q_1d = (bin_edges[:-1] + bin_edges[1:]) / 2
+        r_1d = (bin_edges[:-1] + bin_edges[1:]) / 2
             
-        return q_1d, vis_1d
+        return r_1d, f_1d
 
     def edges(self, x):
         mids = (x[1:] + x[:-1]) / 2.0
@@ -163,12 +175,12 @@ class Plot(object):
         last  = x[-1] + (x[-1] - x[-2]) / 2.0
         return np.r_[first, mids, last]
 
-    def  visibility_profile(self, 
+    def  visibility_profile(self, title = r'$Visibility_{Model}$', 
                             input = None, frank1d = False, weighted = True,
                             bins = 300,
                             phase_shift = True, deproject = True):
 
-        f2d = self._frank2d
+        f2d = self._Frank2D
         geom = self._Geometry
         # model
         u_model = self._u_model
@@ -207,7 +219,8 @@ class Plot(object):
 
         # collocation points for the plot.
         q = np.unique(np.hypot(u_model_1d, v_model_1d))
-        q = np.linspace(q.min(), q.max(), bins)
+        q = np.sort(q)[1:]
+        q = np.geomspace(q[0], q[-1], bins)
         edges = self.edges(q)
 
         # f1d
@@ -227,7 +240,7 @@ class Plot(object):
                 vis_f1d = sol.predict_deprojected(q = q)
             else:
                 vis_f1d = sol._vis_map.predict_visibilities(sol.mean, q, q*0, geometry=self._Geometry )
-                
+
 
         q_model_1d, vis_model_1d = self.get_profile(u_model, v_model, vis_model,
                                                     bins = edges,
@@ -268,26 +281,50 @@ class Plot(object):
         plt.ylim(1e-5, 0)
         plt.xlim(1e5, 6e6)
         plt.ylabel('|V| [Jy]', size = 10)
-        plt.title(r'$Visibility_{Model}$ N = ' + str(self._Nx))
+        plt.title(title+', N = ' + str(self._Nx))
         plt.legend(fontsize= 10, loc = 'best')
         plt.show()
 
+    def calculate_resolution(self, clean_beam, intrinsic_resolution):
+        bmaj_as = clean_beam['bmaj']
+        bmin_as = clean_beam['bmin']
+        final_bmaj_as = np.sqrt(bmaj_as**2 - intrinsic_resolution**2)
+        final_bmin_as = np.sqrt(bmin_as**2 - intrinsic_resolution**2)
+        print(f"-> Final beam to convolve with: {final_bmaj_as} x {final_bmin_as} arcsec")
+        final_resolution = {'bmaj': final_bmaj_as, 'bmin': final_bmin_as, 'beam_pa': clean_beam['beam_pa']}
+        return final_resolution
+
+    def set_f1d_solution(self, sol):
+        self._f1d_profile = sol
+    
+    def set_fits_file(self, fits_file):
+        self._fits_file = fits_file
+
     def intensity_profile(self, title= r'Brightness profile', 
-                          clean = False, fits_file = None,
-                          frank1d = True, bins = 300,
-                          phase_shift = True, deproject = True):
-        f2d = self._frank2d
+                          clean = False,
+                          frank1d = True,
+                          bins = 300, Rmax = None,
+                          resol_f2d = 0, resol_f1d = 0, 
+                          log_scale = True, 
+                          x_lims = None, y_lims = None):
+
+        f2d = self._Frank2D
         geom = self._Geometry
         inc, pa, dra, ddec = geom.inc, geom.pa, geom.dra, geom.ddec
 
+        beam_for_f2d = None
+        beam_for_f1d = None
+
         if clean:
-            if fits_file is None:
-                raise ValueError("Data location for the FITS file to make the CLEAN profile is not provided.")
+            if self._fits_file is None:
+                raise ValueError(
+                    "CLEAN: Data location for the FITS file not provided.\n"
+                    "Use the 'set_fits_file' method.")
             else:
-                cube_1mm = imagecube(fits_file)
+                cube_1mm = imagecube(self._fits_file)
                 x_clean, y_clean, dy_clean = cube_1mm.radial_profile(inc= inc, PA=pa, x0=dra, y0=ddec)
                 
-                fits_image = fits.open(fits_file)
+                fits_image = fits.open(self._fits_file)
                 header = fits_image[0].header
                 bmaj_deg = float(header["BMAJ"])
                 bmin_deg = float(header["BMIN"])
@@ -296,13 +333,21 @@ class Plot(object):
                 bpa_deg = header['BPA']
                 
                 clean_beam = {'bmaj': bmaj_as, 'bmin': bmin_as, 'beam_pa': bpa_deg}
-                area = clean_beam['bmaj']*clean_beam['bmin']*np.pi/4./np.log(2.)*(1/rad_to_arcsec)**2
+                clean_area = clean_beam['bmaj']*clean_beam['bmin']*np.pi/4./np.log(2.)*(1/rad_to_arcsec)**2
+                print(f"Clean beam: {bmaj_as} x {bmin_as} arcsec")
 
-        # input
-        u_input_g = self._u_input
-        v_input_g = self._v_input
-        vis_input_g = self._vis_input
-        weights_input_g = self._weights_input
+                # Decide the beam to convolve with.
+                if resol_f2d > 0:
+                    print(f"FWHM for frank2d: {resol_f2d} arcsec")
+                    beam_for_f2d = self.calculate_resolution(clean_beam, resol_f2d)
+                else: 
+                    beam_for_f2d = clean_beam
+                
+                if resol_f1d > 0 and frank1d:
+                    print(f"FWHM for frank1d: {resol_f1d} arcsec")
+                    beam_for_f1d = self.calculate_resolution(clean_beam, resol_f1d)
+                else:
+                    beam_for_f1d = clean_beam
 
         # model
         u_model = self._u_model
@@ -321,54 +366,62 @@ class Plot(object):
         # phase shift
         vis = geom.apply_phase_shift(-u_model, -v_model, vis_model) # the East of North convention.
         I = f2d.transform(vis).real
+        self._int_model_shifted = I
 
         # deproject
         x_model, y_model = geom.deproject_xy(x_model, y_model)
-        x_model_1d, y_model_1d = geom.deproject_xy(x_model_1d, y_model_1d)
+        x_model_1d_d, y_model_1d_d = geom.deproject_xy(x_model_1d, y_model_1d)
 
         # collocation points for the plot.
-        r = np.unique(np.hypot(x_model_1d, y_model_1d))
+        r = np.unique(np.hypot(x_model_1d_d, y_model_1d_d))
         r = np.linspace(r.min(), r.max(), bins)
         edges = self.edges(r)
 
-        # f1d
+        # frank1d
         if frank1d:
-            #frank1d
-            u_input_f1d = u_input_g
-            v_input_f1d = v_input_g
-            vis_input_f1d = vis_input_g
-            weights_input_f1d = weights_input_g
-            
-            sol = f2d.frank1d(u = u_input_f1d, v = v_input_f1d,
-                                        vis = vis_input_f1d, weights = weights_input_f1d,
-                                        n_pts = self._Nx)
-
-            I_f1d = sol.mean
-            r_f1d = sol.r
+            if self._f1d_profile is None:
+                raise ValueError(
+                    "Set your Frank1D profile first. \n"
+                    "Use the 'set_f1d_solution' method."
+                    )
+            r_f1d, I_f1d = self._f1d_profile.r, self._f1d_profile.mean
 
         r_model_1d, I_model_1d = self.get_profile(x_model, y_model, I, bins = edges)
         I_model_1d = np.nan_to_num(I_model_1d, nan=0)
         
+        Rmax = self._Rmax/2 if Rmax is None else Rmax
+
+        if x_lims is None:
+            x_lims = (0, 0.8*Rmax)
+        if y_lims is None:
+            y_lims = (1e8, 1e11)
+            if clean:
+                y_lims = (1e-6, 5e-3)
+
         plt.figure(figsize=(10,4))
         if clean:
+            area = clean_area
             #  CLEAN --------------------------------------------------------------------
             plt.plot(x_clean, y_clean, "black", label = "CLEAN")
             plt.fill_between(x_clean, y_clean-dy_clean, y_clean+dy_clean, alpha=0.7)
             # frank2D -------------------------------------------------------------------
-            I_model_1d_convolved = convolve_profile(r_model_1d, I_model_1d, inc, pa, clean_beam)*area
+            I_model_1d_convolved = convolve_profile(r_model_1d, I_model_1d, inc, pa, beam_for_f2d)
+            I_model_1d_convolved *= area # Jy/beam
             plt.plot(r_model_1d, I_model_1d_convolved, color = 'blue',ls ='--', label = r'frank2d')
             
             if frank1d:
                 # frank1D ---------------------------------------------------------------
-                I_f1d_convolved = convolve_profile(r_f1d, I_f1d, inc, pa, clean_beam)*area
+                I_f1d_convolved = convolve_profile(r_f1d, I_f1d, inc, pa, beam_for_f1d)
+                I_f1d_convolved *= area # Jy/beam
                 plt.plot(r_f1d, I_f1d_convolved, color = "red", label = r'frank1d')
         
             plt.ylabel(r'log($I_\nu$) [Jy/beam]', size=10)
             plt.xlabel('Radius ["]', size=10)
             plt.legend(fontsize=12)
-            plt.yscale('log')
-            plt.ylim(1e-6, 3e-3)
-            plt.xlim(0,self._Rmax/2)
+            if log_scale:
+                plt.yscale('log')
+            plt.ylim(y_lims)
+            plt.xlim(x_lims)
             plt.show()
         else:
             # frank1D -------------------------------------------------------------------
@@ -381,7 +434,176 @@ class Plot(object):
             plt.xlabel('Radius ["]', size = 10)
             plt.ylabel(r'log($I_\nu$) [$10^{10}$ Jy sr$^{-1}$]', size = 10)
             plt.title(title)
-            plt.xlim(0, self._Rmax/2)
-            plt.yscale('log')
+            plt.xlim(x_lims)
+            plt.ylim(y_lims)
+            if log_scale:
+                plt.yscale('log')
             plt.legend()
             plt.show()
+
+    def stats_optimization(self, MAP_estimator = None):
+        r"""
+        Plot the statistics of the posterior optimization.
+        Params
+        ------
+        MAP_estimator: MAPEstimator object, optional
+            The MAPEstimator object used in the optimization.
+            If not provided, it will use the one from the Frank2D object.
+        """
+        f2d = self._Frank2D
+        if MAP_estimator is None:
+            if f2d._MAP_estimator is None:
+                raise ValueError("MAPEstimator object not provided.")
+            self._MAP_estimator = f2d._MAP_estimator
+        else:
+            if isinstance(MAP_estimator, MAPEstimator) is False:
+                raise ValueError("MAP_estimator must be an instance of MAPEstimator class.")
+            self._MAP_estimator = MAP_estimator
+        
+        ME = self._MAP_estimator
+
+        iterations = np.arange(1, len(ME._minus_log_posteriors) + 1)
+
+        fig, axs = plt.subplots(2, 4, figsize=(10, 5))
+        axs = axs.ravel()
+
+        axs[0].plot(iterations, ME._minus_log_posteriors)
+        axs[0].set_title("- log posterior variation")
+        axs[0].set_xlabel("Iterations")
+
+        axs[1].plot(iterations, ME._jDjs)
+        axs[1].set_title("-jDj term variation")
+        axs[1].set_xlabel("Iterations")
+
+        axs[2].plot(iterations, ME._logdetDs)
+        axs[2].set_title("-Log|D| term variation")
+        axs[2].set_xlabel("Iterations")
+
+        axs[3].plot(iterations, ME._logdetSs)
+        axs[3].set_title("Log|S| variation")
+        axs[3].set_xlabel("Iterations")
+
+        axs[4].plot(iterations, ME._ms, label="m")
+        axs[4].set_title(f"m")
+        axs[4].set_xlabel("Iterations")
+
+        axs[5].plot(iterations, ME._cs, label="c")
+        axs[5].set_title(f"log(c)")
+        axs[5].set_xlabel("Iterations")
+        axs[5].set_yscale("log")
+
+        axs[6].plot(iterations, ME._ls, label="l")
+        axs[6].set_title(f"log(l)")
+        axs[6].set_xlabel("Iterations")
+        axs[6].set_yscale("log")
+
+        for ax in axs[7:]:
+            fig.delaxes(ax)
+
+        fig.suptitle(f'Optimization stats', fontsize=10)
+
+        fig.tight_layout()
+        plt.show()
+    
+    def MAP_power_spectrum(self, data, MAP_estimator = None):
+        r"""
+        Plot the power spectrum of the best parameters found in the posterior optimization.
+        Params
+        ------
+        data: dict
+            Dictionary with the observed data. 
+            It must contain the keys 'u', 'v', 'vis', 'weights'.
+        MAP_estimator: MAPEstimator object, optional
+            The MAPEstimator object used in the optimization.
+            If not provided, it will use the one from the Frank2D object.
+        """
+        f2d = self._Frank2D
+        if MAP_estimator is None:
+            if f2d._MAP_estimator is None:
+                raise ValueError("MAPEstimator object not provided.")
+            self._MAP_estimator = f2d._MAP_estimator
+        else:
+            if isinstance(MAP_estimator, MAPEstimator) is False:
+                raise ValueError("MAP_estimator must be an instance of MAPEstimator class.")
+            self._MAP_estimator = MAP_estimator
+
+        ME = self._MAP_estimator
+
+        # Plot visibilities gridded.
+        from frank.utilities import UVDataBinner       
+        bin_widths=[1e3, 1e5]
+
+        u, v = data['u'], data['v']
+        Vis = data['vis']
+        Weights = data['weights']
+
+        baselines = np.hypot(u, v)
+        binned_vis = UVDataBinner(baselines, Vis, Weights, bin_widths[0])
+        logx = np.log10(binned_vis.uv)
+        logy = np.log10(np.abs(binned_vis.V)**2)
+
+        binned_vis2 = UVDataBinner(baselines, Vis, Weights, bin_widths[1])
+        logx2 = np.log10(binned_vis2.uv)
+        logy2 = np.log10(np.abs(binned_vis2.V)**2)
+
+        def linear_power_spectrum(logx, m, c):
+            return m*logx + np.log10(c)
+
+        m = ME.MAP['m']
+        c = ME.MAP['c']
+        P = ME.power_spectrum(baselines, m, c)
+
+        lgx = np.log10(np.geomspace(np.sort(baselines)[1], baselines.max(), 1000))
+        lgy = linear_power_spectrum(lgx, m, c)
+
+        cs, ms = ['#a4a4a4', 'k'], ['.', 'x']
+
+        plt.figure(figsize=(7, 3))
+        plt.plot(logx, logy, c=cs[0], marker=ms[0], ls='None', label=r'Obs., {:.0f} k$\lambda$ bins'.format(bin_widths[0]/1e3))
+        plt.plot(logx2, logy2, c=cs[1], marker=ms[1], ls='None', label=r'Obs., {:.0f} k$\lambda$ bins'.format(bin_widths[1]/1e3))
+        plt.plot(lgx, lgy, ls='-', color= 'r', label='MAP, m={:.2f}, log(c)={}'.format(m, np.log10(c)))
+        plt.xlabel(r'log Baseline [$\lambda$]', size = 10)
+        plt.ylabel(r'log $|Vis_{Obs}|^{2}$ [Jy]', size = 10)
+        plt.legend(loc = 'best', fontsize = 'x-small')
+        plt.title("Power spectrum")
+        plt.ylim(-9, 0)
+        plt.xlim(5, 6.5)
+        plt.show()
+
+    @property
+    def I_shifted(self):
+        if self._int_model_shifted is None:
+            f2d = self._Frank2D
+            geom = self._Geometry
+
+            u_model = self._u_model
+            v_model = self._v_model
+            vis_model = self._vis_model
+
+            vis = geom.apply_phase_shift(-u_model, -v_model, vis_model) # the East of North convention.
+            self._int_model_shifted = f2d.transform(vis).real
+        return self._int_model_shifted
+    
+    @property
+    def x_1d(self):
+        return self._x_model_1d
+    
+    @property
+    def y_1d(self):
+        return self._y_model_1d
+    
+    @property
+    def x_2d(self):
+        return self._x_models
+    
+    @property
+    def y_2d(self):
+        return self._y_model
+
+    @property
+    def Nx(self):
+        return self._Nx
+       
+    @property
+    def Ny(self):
+        return self._Ny
