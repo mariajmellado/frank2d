@@ -157,11 +157,13 @@ class MAPEstimator(object):
         """
         Get the minus log posterior for the initial guess.
         """
+        self._iter = 0
         GM = self._GM
 
         params = {'m': 0, 'logc': -2, 'logl': 4}
         p0 = GM.minus_log_posterior(params)
         jDj0, logdetS0, logdetD0 = GM.jDj, GM.logdetS, GM.logdetD
+        end_time = time.time()
 
         return p0, jDj0, logdetS0, logdetD0
     
@@ -173,11 +175,12 @@ class MAPEstimator(object):
         x : array-like
             Parameters to evaluate. If len(x) == 2, x = [p, m] and logl = 4.0.
         """
+        self._iter += 1
 
         GM = self._GM
 
-        p0, jDj0, logdetS0, logdetD0 = self._get_p0()
-        
+        p0, jDj0, logdetS0, logdetD0 = self._p0
+
         x_ = self.process_x_minimizer(x)
         params = {'m': x_['m'], 'logc': x_['logc'], 'logl': x_['logl']}
 
@@ -185,9 +188,6 @@ class MAPEstimator(object):
 
         jDj, S, D = GM.jDj - jDj0, GM.logdetS - logdetS0, GM.logdetD - logdetD0
         self.save_results(params['m'], 10**params['logc'], 10**params['logl'], jDj, D, S, current)
-            
-        #print(f'------> p: {p:0.3f}, m: {m:0.3f}, logc: {logc:3e}, logl: {logl:3e}: {minus_log_likelihood:0.2f} ' +
-        #    f'(jDj={jDj:.3e}, |S|={S:.3e}, |D|={D:.3e})')
 
         return current
 

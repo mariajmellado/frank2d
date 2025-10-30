@@ -25,10 +25,10 @@ class Plot(object):
         self._FT = Frank2D._FT
         self._Nx = self._Ny = Frank2D._N
         
-        self._u_input = Frank2D._gridded_data['u']
-        self._v_input = Frank2D._gridded_data['v']
-        self._vis_input = Frank2D._gridded_data['vis']
-        self._weights_input = Frank2D._gridded_data['weights']
+        self._u_input = Frank2D.gridded_data['u']
+        self._v_input = Frank2D.gridded_data['v']
+        self._vis_input = Frank2D.gridded_data['vis']
+        self._weights_input = Frank2D.gridded_data['weights']
 
         self._u_model = self._Frank2D.u_grid
         self._v_model = self._Frank2D.v_grid
@@ -99,7 +99,8 @@ class Plot(object):
         plt.gca().invert_yaxis()
         plt.show()
     
-    def intensity(self, title= r'$I_{Model}$', fig_size = 6, vmin = 0, vmax = 4e10, gamma = 0.45,
+    def intensity(self, title= r'$I_{Model}$', fig_size = 6,
+                  vmin = 0, vmax = 4e10, gamma = 0.45,
                   phase_shift = True, deproject = False):
         
         Nx, Ny = self._Nx, self._Ny
@@ -225,16 +226,18 @@ class Plot(object):
 
         # f1d
         if frank1d:
-            #frank1d
-            u_input_f1d = u_input_g
-            v_input_f1d = v_input_g
-            vis_input_f1d = vis_input_g
-            weights_input_f1d = weights_input_g
+           if self._f1d_profile is None:
+            print("Frank1D profile not set." 
+                  "Using gridded visibilities as input.")
+
+            data = {
+                'u': u_input_g,
+                'v': v_input_g,
+                'vis': vis_input_g,
+                'weights': weights_input_g
+            }
             
-            sol = f2d.frank1d(  u = u_input_f1d, v = v_input_f1d,
-                                vis = vis_input_f1d, weights = weights_input_f1d,
-                                n_pts = self._Nx
-                            )
+            sol = f2d.frank1d(data = data, n_pts = self._Nx)
 
             if deproject:
                 vis_f1d = sol.predict_deprojected(q = q)

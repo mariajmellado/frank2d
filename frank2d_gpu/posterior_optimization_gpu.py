@@ -86,8 +86,12 @@ class MAPEstimator(object):
     def optimize(self, data, initial_guess = {"m": -2, "logl": 4}):
         print("Fitting the visibilities with Frank2D with 2DFT...")
         # Fit with Frankenstein1D scheme.
+        start_time = time.time()
         u, v, vis, weights = data['u'], data['v'], data['vis'], data['weights']
         self._FF.fit(u, v, vis, weights)
+
+        end_time = time.time()
+        print(f" + Time to preprocess the visibilities: {end_time - start_time:.2f} seconds")
         self._GM = self._FF.GaussianModel
         self._minus_log_posterior = self._GM.minus_log_posterior
         self._p0 = self._get_p0()
@@ -119,16 +123,16 @@ class MAPEstimator(object):
     def eval_prob(self, x):
         GM = self._GM
 
-        p0, jDj0, logdetS0, logdetD0 = self._get_p0()
+        p0, jDj0, logdetS0, logdetD0 = self._p0
         
         x_ = self.process_x_minimizer(x)
         params = {'m': x_['m'], 'logc': x_['logc'], 'logl': x_['logl']}
 
         current = GM.minus_log_posterior(params) - p0
-
         jDj, S, D = GM.jDj - jDj0, GM.logdetS - logdetS0, GM.logdetD - logdetD0
-        self.save_results(params['m'], 10**params['logc'], 10**params['logl'], jDj, D, S, current)
 
+        self.save_results(params['m'], 10**params['logc'], 10**params['logl'], jDj, D, S, current)
+        
         return current
 
     def save_results(self, m, c, l, jDj, logdetD, logdetS, minus_log_posterior):
@@ -578,9 +582,6 @@ class GaussianModel:
             Dictionary containing the parameters m, log_c, log_l.
             If None, use the current values of the class.
         """
-
-        start_time = time.time()
-
         if param is not None:
             m = param['m']
             c = 10**param['logc']
@@ -625,9 +626,6 @@ class GaussianModel:
 
         log_posterior =  (prior - 0.5*self._logdetS + 0.5*self._logdetD + 0.5*self._jDj)
         minus_log_posterior = - log_posterior
-
-        end_time = time.time()
-        print(f" + Total time to evaluate the posterior: {end_time - start_time:.2f} seconds")
 
         return minus_log_posterior
 

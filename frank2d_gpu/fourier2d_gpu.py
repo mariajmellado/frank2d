@@ -172,6 +172,16 @@ class FourierTransform2D(object):
     def y(self):
         """ Collocation points y-axis in the image plane"""
         return self._y
+    
+    @property
+    def dx(self):
+        """ Sampling interval in the image plane along x-axis in rad"""
+        return self._dx
+    
+    @property
+    def dy(self):
+        """ Sampling interval in the image plane along y-axis in rad"""
+        return self._dy
 
     @property
     def uv_points_convention(self):

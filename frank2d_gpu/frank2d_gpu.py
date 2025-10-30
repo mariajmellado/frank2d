@@ -3,7 +3,7 @@ from .fourier2d_gpu import FourierTransform2D
 from .geometry import Geometry
 from .preprocess_vis_gpu import Gridding
 from .fitting_gpu import IterativeSolverMethod
-from .gaussian_process import Wendland
+from .gaussian_process_gpu import Wendland
 from .posterior_optimization_gpu import MAPEstimator
 
 
@@ -34,15 +34,6 @@ class Frank2D(object):
         self._Rmax = Rmax / rad_to_arcsec
         self._Geometry = geom
         self._FT = FourierTransform2D(self._Rmax, self._N, self._Geometry)
-
-        ###### DELETE LATER ######
-        self._gridded_data = None
-        self._gridded_data_postprocess = None
-        self._kernel_info = None
-        self._x0 = None
-        self._solver = None
-        self._linear_system = None
-        ###### DELETE LATER ######
 
         self._set_guess = False
         self._set_kernel = False
@@ -185,6 +176,7 @@ class Frank2D(object):
 
     def build_full_visibility_model(self):
         print("Building full visibility model...")
+        start = time.time()
 
         index_w = self._gridded_data_postprocess["index_weighted"]
         data_w = self._gridded_data_postprocess["weighted"]
@@ -216,6 +208,10 @@ class Frank2D(object):
 
         V_full[data_coords_w] = V1
         V_full[data_coords_uw] = V2
+
+        end = time.time()
+        execution_time = end - start
+        print(f'--> time build full visibility = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
 
         return V_full
 
@@ -256,23 +252,23 @@ class Frank2D(object):
 
         self._sol_intensity = self.transform(self._sol_visibility)
 
-    def search_MAP(self, u=None, v=None, Vis=None, Weights=None,
+    def search_MAP(self, data=None,
                    initial_guess={'m': -2, 'logl': 4},
                    N=50):
-        if not self._set_gridded_data:
-            if (u is None) or (v is None) or (Vis is None) or (Weights is None):
-                raise ValueError("If gridded data is not set, u, v, Vis and Weights must be provided.")
-            self.process_vis({"u": u, "v": v, "vis": Vis, "weights": Weights}, hermitian=True)
+        if data is  None:
+            print("Using existing visibility data...")
+            if not self._set_gridded_data:
+                raise ValueError("Gridded data is not set, u, v, Vis and Weights must be provided.")
+            data = self._gridded_data
 
         if not self._set_MAP_estimator:
             self._MAP_estimator = MAPEstimator(self._Rmax * rad_to_arcsec, self._Geometry, N=N)
             self._set_MAP_estimator = True
 
-        self._MAP_estimator.optimize(self._gridded_data, initial_guess)
+        self._MAP_estimator.optimize(data, initial_guess)
         self._MAP = self._MAP_estimator.MAP
 
     def transform(self, vis, direction="backward"):
-        # assume FourierTransform2D.fast_transform accepts cupy arrays
         return self._FT.fast_transform(vis, direction=direction)
 
     def frank1d(self, data=None,

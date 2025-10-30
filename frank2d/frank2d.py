@@ -40,15 +40,6 @@ class Frank2D(object):
         self._Geometry = geom
         self._FT = FourierTransform2D(self._Rmax, self._N, self._Geometry)
 
-        ###### DELETE LATER ######
-        self._gridded_data = None
-        self._gridded_data_postprocess = None
-        self._kernel_info = None
-        self._x0 = None
-        self._solver = None
-        self._linear_system = None
-        ###### DELETE LATER ######
-
         self._set_guess = False
         self._set_kernel = False
         self._set_gridded_data = False
@@ -277,6 +268,7 @@ class Frank2D(object):
             Full visibility model on a Nx x Ny grid.
         """
         print("Building full visibility model...")
+        start_time = time.time()
 
         index_w = self._gridded_data_postprocess["index_weighted"]
         data_w = self._gridded_data_postprocess["weighted"]
@@ -308,6 +300,10 @@ class Frank2D(object):
 
         V_full[data_coords_w] = V1
         V_full[data_coords_uw] = V2
+
+        end_time = time.time()
+        execution_time = end_time - start_time
+        print(f'--> times building full visibility model = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
 
         return V_full
 
@@ -348,7 +344,7 @@ class Frank2D(object):
             Whether to run the fit from scratch (resetting all previous settings),
             i.e., running from after gridding.
         """
-        if not self._set_gridded_data:
+        if not self._set_gridded_data or data is not None:
             if not data: # empty dict.
                 raise ValueError("If gridded data is not set, u, v, Vis and Weights must be provided.")
             try:
@@ -380,19 +376,20 @@ class Frank2D(object):
 
         self._sol_intensity = self.transform(self._sol_visibility)
 
-    def search_MAP( self, u = None, v = None, Vis = None, Weights = None,
-                    initial_guess = {'m': -2, 'logl': 4},
-                    N = 50):
-        if not self._set_gridded_data:
-            if (u is None) or (v is None) or (Vis is None) or (Weights is None):
-                raise ValueError("If gridded data is not set, u, v, Vis and Weights must be provided.")
-            self.process_vis(u, v, Vis, Weights, hermitian = True)
+    def search_MAP(self, data=None,
+                   initial_guess={'m': -2, 'logl': 4},
+                   N=50):
+        if data is None:
+            print("Using existing visibility data...")
+            if not self._set_gridded_data:
+                raise ValueError("Gridded data is not set, u, v, Vis and Weights must be provided.")
+            data = self._gridded_data
 
         if not self._set_MAP_estimator:
-            self._MAP_estimator = MAPEstimator(self._Rmax*rad_to_arcsec, self._Geometry, N = N)
-        
-        self._MAP_estimator.optimize(self._gridded_data, initial_guess)
+            self._MAP_estimator = MAPEstimator(self._Rmax * rad_to_arcsec, self._Geometry, N=N)
+            self._set_MAP_estimator = True
 
+        self._MAP_estimator.optimize(data, initial_guess)
         self._MAP = self._MAP_estimator.MAP
 
     def transform(self, vis, direction = "backward"):
@@ -426,8 +423,8 @@ class Frank2D(object):
             Fitted visibility data using 1D Frank.
         """
         print('Performing 1D Frank fit...' + '\n')
-        print(r'$\alpha$ = ', str(alpha), r' and $w_{smooth}$ = ', str(w_smooth) + '\n')
-        print( 'N = ', str(n_pts), r' and $R_{max}$ = ', str(rout))
+        print(r'+ $\alpha$ = ', str(alpha), r' and $w_{smooth}$ = ', str(w_smooth) + '\n')
+        print( '+ N = ', str(n_pts), r' and $R_{max}$ = ', str(rout))
         if geom is None:
             geom = self._Geometry
         inc, pa, dra, ddec = geom._inc, geom._pa, geom._dra, geom._ddec

@@ -1,4 +1,6 @@
 import cupy as cp
+import numpy as np
+
 
 class Gridding(object):
     def __init__(self, Rmax, FT, Geometry):
@@ -78,7 +80,7 @@ class Gridding(object):
         # Enforce Hermitian symmetry if requested
         if hermitian:
             vis_gridded, weights_gridded = self.enforce_hermitian_symmetry(vis_gridded, weights_gridded)
-        
+
         if unshift == True:
             # Unshifted grid.
             print("Unshiftting grid..")
@@ -109,14 +111,27 @@ class Gridding(object):
 
     def enforce_hermitian_symmetry(self, vis, wts):
         """
-        Enforce Hermitian symmetry on the gridded visibilities.
+        Function to enforce Hermitian symmetry on the gridded visibilities.
+        Parameters
+        ----------
+        vis : 2D array, unit = Jy
+            Gridded visibilities.
+        wts : 2D array, unit = 1/Jy^2
+            Gridded weights.
+        Returns
+        -------
+        vis : 2D array, unit = Jy
+            Gridded visibilities with Hermitian symmetry enforced.
+        wts : 2D array, unit = 1/Jy^2
+            Gridded weights with Hermitian symmetry enforced.
         """
-        # Center zero frequency for symmetric indexing
-        vis = cp.fft.fftshift(vis)
-        wts = cp.fft.fftshift(wts)
-        nx, ny = vis.shape
+        vis = vis.get()
+        wts = wts.get()
 
-        for x in range(nx):
+        nx, ny = vis.shape  
+        cx, cy = (nx // 2), (ny // 2)
+
+        for x in range(nx):  
             for y in range(ny):
                 x_sym = (-x) % nx
                 y_sym = (-y) % ny
@@ -127,17 +142,19 @@ class Gridding(object):
                 w_xy = wts[y, x]
                 w_neg_xy = wts[y_sym, x_sym]
 
-                if (w_xy > 0) or (w_neg_xy > 0):
+                if w_xy > 0 or w_neg_xy > 0:    
                     w_tot = w_xy + w_neg_xy
                     if w_tot > 0:
-                        val = (cp.conj(v_neg_xy) * w_neg_xy + v_xy * w_xy) / w_tot
+                        val = (np.conj(v_neg_xy) * w_neg_xy + v_xy * w_xy) / w_tot
                         vis[y, x] = val
-                        vis[y_sym, x_sym] = cp.conj(val)
+                        vis[y_sym, x_sym] = np.conj(val)
+
                         wts[y, x] = w_tot
                         wts[y_sym, x_sym] = w_tot
+        
+        vis = cp.array(vis)
+        wts = cp.array(wts)
 
-        vis = cp.fft.ifftshift(vis)
-        wts = cp.fft.ifftshift(wts)
         return vis, wts
 
     def shiftting(self, freqs, vis_matrix, weights_matrix):

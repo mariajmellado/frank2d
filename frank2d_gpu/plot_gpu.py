@@ -24,10 +24,10 @@ class Plot(object):
         
         self._Nx = self._Ny = Frank2D._N
         
-        self._u_input = Frank2D._gridded_data['u'].get()
-        self._v_input = Frank2D._gridded_data['v'].get()
-        self._vis_input = Frank2D._gridded_data['vis'].get()
-        self._weights_input = Frank2D._gridded_data['weights'].get()
+        self._u_input = Frank2D.gridded_data['u'].get()
+        self._v_input = Frank2D.gridded_data['v'].get()
+        self._vis_input = Frank2D.gridded_data['vis'].get()
+        self._weights_input = Frank2D.gridded_data['weights'].get()
 
         self._u_model = self._Frank2d.u_grid.get()
         self._v_model = self._Frank2d.v_grid.get()

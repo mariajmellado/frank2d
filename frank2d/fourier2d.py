@@ -106,6 +106,9 @@ class FourierTransform2D(object):
             with the zero frequency at the center.
         direction : str
             Direction of the transform. Can be 'forward' or 'backward'.
+            Where:
+                forward: from frequency to image space.
+                backward: from image to frequency space.
         """
         # np.fft.fft2 assumes the zero frequency is at the [0,0] index.
         # so we need to unshift the object first.
@@ -173,6 +176,16 @@ class FourierTransform2D(object):
     def y(self):
         """ Collocation points y-axis in the image plane"""
         return self._y
+
+    @property
+    def dx(self):
+        """ Sampling interval in the image plane along x-axis in rad"""
+        return self._dx
+    
+    @property
+    def dy(self):
+        """ Sampling interval in the image plane along y-axis in rad"""
+        return self._dy
 
     @property
     def uv_points_convention(self):

@@ -172,7 +172,6 @@ class Gridding(object):
             vis_gridded = vis_gridded.ravel(order="C")  
             weights_gridded = weights_gridded.ravel(order="C")
             if self._set_grid == False:
-                print("Warning: You are using the default grid from the Fourier Transform object.")
                 u_gridded, v_gridded = self._FT._Un, self._FT._Vn
             else:
                 u_gridded, v_gridded = np.meshgrid(self._bin_centers_u, self._bin_centers_v)
@@ -200,9 +199,6 @@ class Gridding(object):
         wts : 2D array, unit = 1/Jy^2
             Gridded weights with Hermitian symmetry enforced.
         """
-        # Shift zero frequency to the center for easier indexing.
-        vis = np.fft.fftshift(vis)
-        wts = np.fft.fftshift(wts)
         nx, ny = vis.shape  
         cx, cy = (nx // 2), (ny // 2)
 
@@ -227,8 +223,6 @@ class Gridding(object):
                         wts[y, x] = w_tot
                         wts[y_sym, x_sym] = w_tot
 
-        vis = np.fft.ifftshift(vis)
-        wts = np.fft.ifftshift(wts)
         return vis, wts
 
     def shiftting(self, freqs, vis_matrix, weights_matrix):
