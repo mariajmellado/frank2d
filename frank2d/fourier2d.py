@@ -1,7 +1,7 @@
 import numpy as np
 
 class FourierTransform2D(object):
-    def __init__(self, Rmax, N, Geometry):
+    def __init__(self, Rmax, N):
         """
         Fourier Transform in 2D using DFT and FFT.
         Parameters
@@ -10,8 +10,6 @@ class FourierTransform2D(object):
             Maximum value of the x and y coordinates in rad.
         N : int
             Number of collocation points in each direction.
-        Geometry : str
-            Geometry of the problem.
         """
         self._Xmax = Rmax # radians
         self._Ymax = Rmax
@@ -156,6 +154,11 @@ class FourierTransform2D(object):
     def Rmax(self):
         """ Maximum value of the x coordinate in rad"""
         return self._Xmax
+
+    @property
+    def Qmax(self):
+        """ Maximum value of the u coordinate in rad^-1"""
+        return np.max(self.q)
     
     @property
     def u(self):

@@ -33,7 +33,7 @@ class Frank2D(object):
         self._N2 = self._N * self._N
         self._Rmax = Rmax / rad_to_arcsec
         self._Geometry = geom
-        self._FT = FourierTransform2D(self._Rmax, self._N, self._Geometry)
+        self._FT = FourierTransform2D(self._Rmax, self._N)
 
         self._set_guess = False
         self._set_kernel = False

@@ -508,7 +508,7 @@ class Plot(object):
         fig.tight_layout()
         plt.show()
     
-    def MAP_power_spectrum(self, data, MAP_estimator = None):
+    def MAP_power_spectrum(self, data, MAP_estimator = None, params = None):
         r"""
         Plot the power spectrum of the best parameters found in the posterior optimization.
         Params
@@ -522,9 +522,12 @@ class Plot(object):
         """
         f2d = self._Frank2d
         if MAP_estimator is None:
-            if f2d._MAP_estimator is None:
-                raise ValueError("MAPEstimator object not provided.")
-            self._MAP_estimator = f2d._MAP_estimator
+            if params is None:
+                if f2d._MAP_estimator is None:
+                    raise ValueError("MAPEstimator object not provided.")
+                self._MAP_estimator = f2d._MAP_estimator
+            else:
+                pass
         else:
             if isinstance(MAP_estimator, MAPEstimator) is False:
                 raise ValueError("MAP_estimator must be an instance of MAPEstimator class.")
@@ -552,9 +555,12 @@ class Plot(object):
         def linear_power_spectrum(logx, m, c):
             return m*logx + np.log10(c)
 
-        m = ME.MAP['m']
-        c = ME.MAP['c']
-        P = ME.power_spectrum(baselines, m, c)
+        if params is not None:
+            m = params['m']
+            c = params['c']
+        else:
+            m = ME.MAP['m']
+            c = ME.MAP['c']
 
         lgx = np.log10(np.geomspace(np.sort(baselines)[1], baselines.max(), 1000))
         lgy = linear_power_spectrum(lgx, m, c)

@@ -73,6 +73,13 @@ class CorrelationMatrix():
         elif q == 0:
             q = self._min_freq
         return c*(q**m)
+    
+    def sparse(self):
+        """
+        Returns the Wendland covariance matrix as a sparse linear operator.
+        """
+        size = (self._size, self._size2)
+        return  linear_operator(self.sparse_matrix(), size)
 
 class SquaredExponential(CorrelationMatrix):
     def __init__(self, params, u, v, u2 = None, v2 = None):
@@ -89,7 +96,12 @@ class SquaredExponential(CorrelationMatrix):
         """
 
         super().__init__(params, u, v, u2, v2)
-        self._m, self._c, self._l, self._k = params
+        self._m = params["m"]
+        self._c = params["c"]
+        self._l = params["l"]
+
+        self._sparse_tol = 1e-30 # higher value means more sparse.
+        self._r_cutoff = np.sqrt(-2.0 * np.log(self._sparse_tol))
 
         self._ul = self._u/self._l
         self._vl = self._v/self._l
@@ -108,16 +120,70 @@ class SquaredExponential(CorrelationMatrix):
 
         return amp * np.exp(-0.5 * ((self._ul - self._ul2[i]) ** 2 + (self._vl - self._vl2[i]) ** 2))
     
-    def row_polar(self, i):
+    def _row_sparse(self, i, u1_norm, v1_norm, q1):
         """
-        Returns the i-th row of the covariance matrix in polar coordinates.
+        Internal helper for sparse_matrix.
+        Calculates a subset of row i based on provided normalized coords.
         """
-        amp = np.sqrt(self._power_spectrum_q1 * self.power_spectrum(self._q2[i], self._m, self._c))
-        q_i = (self._ul - self._ul2[i]) ** 2 + (self._vl - self._vl2[i]) ** 2
-        theta = np.arctan2(self._v, self._u)/self._k
-        theta_i = (theta - theta[i])**2
+        ps = self.power_spectrum(self._q2[i], self._m, self._c)
+        amp = np.sqrt(q1 * ps)
+        
+        r_sq = (u1_norm - self._ul2[i])**2 + (v1_norm - self._vl2[i])**2
+        
+        return amp * np.exp(-0.5 * r_sq)
 
-        return  amp * np.exp(-0.5 * (q_i + theta_i))
+    
+    def sparse_matrix(self):
+        """
+        Constructs the sparse covariance matrix using the Squared Exponential covariance function.
+        
+        Returns:
+        csr_matrix: scipy.sparse.csr_matrix
+            Sparse covariance matrix in Compressed Sparse Row format.
+            
+        Note:
+        This method constructs an *approximate* sparse covariance matrix.
+        It uses a KDTree to find neighbors within a cutoff radius, r_cutoff,
+        and sets all kernel elements beyond this radius to zero.
+        The cutoff radius is calculated from 'sparse_tol' in the params:
+        r_cutoff = sqrt(-2 * log(sparse_tol))
+        This radius is applied to the coordinates *normalized* by the length scale 'l'.
+        """
+        data = []
+        indices = []
+        indptr = [0]
+
+        coords1 = np.array([self._ul, self._vl]).T
+        coords2 = np.array([self._ul2, self._vl2]).T
+        
+        tree = KDTree(coords1)
+        tree2 = KDTree(coords2)
+        
+        ngb = tree2.query_ball_tree(tree, self._r_cutoff)
+        
+        for i, ngb_i in enumerate(ngb):
+            ngb_i = list(ngb_i)
+            if not ngb_i:
+                indptr.append(len(data))
+                continue
+            
+            row_values = self._row_sparse(i, 
+                                          u1_norm=self._ul[ngb_i], 
+                                          v1_norm=self._vl[ngb_i], 
+                                          q1=self._power_spectrum_q1[ngb_i])
+            
+            data.extend(row_values)
+            indices.extend(ngb_i)
+            indptr.append(len(data))
+        
+        data = np.array(data)
+        indices = np.array(indices)
+        indptr = np.array(indptr)
+
+        size = (self._size, self._size2)
+        kernel_csr = csr_matrix((data, indices, indptr), shape=size)
+
+        return kernel_csr
 
 
 class Wendland(CorrelationMatrix):
@@ -228,14 +294,6 @@ class Wendland(CorrelationMatrix):
         kernel_csr = csr_matrix((data, indices, indptr), shape=size)
 
         return kernel_csr
-
-    def sparse(self):
-        """
-        Returns the Wendland covariance matrix as a sparse linear operator.
-        """
-        size = (self._size, self._size2)
-        return  linear_operator(self.sparse_matrix(), size)
-
 
 
 

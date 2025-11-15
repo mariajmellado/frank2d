@@ -171,7 +171,7 @@ class FourierBesselFitter(object):
 
         self._geometry = geometry
 
-        self._2DFT = FourierTransform2D(Rmax, N, geometry)
+        self._2DFT = FourierTransform2D(Rmax, N)
         self._Rmax = Rmax*rad_to_arcsec
 
         if assume_optically_thick:

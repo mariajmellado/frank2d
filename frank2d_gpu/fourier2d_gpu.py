@@ -1,7 +1,7 @@
 import cupy as cp
 
 class FourierTransform2D(object):
-    def __init__(self, Rmax, N, Geometry):
+    def __init__(self, Rmax, N):
         """
         Fourier Transform in 2D using DFT and FFT (CuPy backend).
         Parameters
@@ -10,8 +10,6 @@ class FourierTransform2D(object):
             Maximum value of the x and y coordinates in rad.
         N : int
             Number of collocation points in each direction.
-        Geometry : str
-            Geometry of the problem.
         """
         self._Xmax = Rmax  # radians
         self._Ymax = Rmax

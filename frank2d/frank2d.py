@@ -1,7 +1,7 @@
 from .constants import rad_to_arcsec, deg_to_rad
 from .fourier2d import FourierTransform2D
 from .geometry import Geometry
-from .preprocess_vis import Gridding
+from .process_vis import Gridding, PostProcess
 from .fitting import IterativeSolverMethod
 from .gaussian_process import SquaredExponential, Wendland
 from .posterior_optimization import MAPEstimator
@@ -20,7 +20,7 @@ This is the main module of the Frank2D package.
 """
 
 class Frank2D(object):
-    def __init__(self, N, Rmax, geom):
+    def __init__(self, N, Rmax):
         """
         Initialize the Frank2D class.
         Parameters:
@@ -29,18 +29,15 @@ class Frank2D(object):
             Number of collocation points in each dimension (image will be NxN).
         Rmax : float
             Radius of the image in arcseconds.
-        geom : Geometry object
-            Geometry object containing source geometry parameters.
         """
         self._N =  N
         self._Nx = N
         self._Ny = N
         self._N2 = self._N*self._N
         self._Rmax = Rmax/rad_to_arcsec
-        self._Geometry = geom
-        self._FT = FourierTransform2D(self._Rmax, self._N, self._Geometry)
+        self._FT = FourierTransform2D(self._Rmax, self._N)
 
-        self._set_guess = False
+        self._set_x0 = False
         self._set_kernel = False
         self._set_gridded_data = False
         self._set_fit_method = False
@@ -49,59 +46,50 @@ class Frank2D(object):
         self._sol_visibility = None
         self._sol_intensity = None
 
-    def set_kernel(self, type_kernel, kernel_params):
+    def set_kernel( self, kernel_type = 'wend', 
+                    kernel_params = {'m': -2, 'c': 1e8, 'l': 5e4}
+                    ):
         """
         Setter of the Gaussian Process kernel.
         Parameters:
         -----------
-        type_kernel : str
-            Type of kernel to use ('SquareExponential' or 'Wendland').
+        kernel_type : str
+            Type of kernel to use ('sqexp' or 'wend').
         kernel_params : list
             Parameters for the kernel, amplitude (given by m and c) and length scale (l).
         """
-        print("Setting GP Kernel " + type_kernel + "...")
+        print("===>  Setting GP Kernel " + kernel_type + "...")
+        print("        + Kernel parameters: ", kernel_params)
 
-        kernel_types_allowed = ['SquareExponential', 'Wendland']
+        kernel_types_allowed = ['sqexp', 'wend']
         
-        if type_kernel not in kernel_types_allowed:
-            raise ValueError("Unknown kernel type. Use 'SquareExponential' or 'Wendland'.")
+        if kernel_type not in kernel_types_allowed:
+            raise ValueError("Unknown kernel type. Use 'sqexp' or 'wend'.")
         else:
-            self._kernel_info = {"type": type_kernel, "params": kernel_params}
+            self._kernel_info = {"type": kernel_type, "params": kernel_params}
 
         self._set_kernel = True
 
-    def get_kernel(self, kernel_info, u, v, u2 = None, v2 = None):
+    def get_kernel(self, kernel_type):
         """
         Getter of the Gaussian Process kernel.
         Parameters:
         -----------
         kernel_info : dict
             Dictionary containing kernel type and parameters.
-        u : 1D array
-            u coordinates of the visibility data.
-        v : 1D array
-            v coordinates of the visibility data.
-        u2 : 1D array
-            Optional second set of u coordinates to compute correlation.
-        v2 : 1D array
-            Optional second set of v coordinates to compute correlation.
-
         Returns:
         --------
         Kernel : CovarianceMatrix object
             Correlation matrix operator.
         """
-        type_kernel = kernel_info["type"]
-        params = kernel_info["params"]
+        types_allowed = ['sqexp', 'wend']
 
-        types_allowed = ['SquaredExponential', 'Wendland']
+        if kernel_type == 'sqexp':
+            return SquaredExponential
+        elif kernel_type == 'wend':
+            return Wendland
 
-        if type_kernel == 'SquareExponential':
-            return SquaredExponential(params, u, v, u2 = u2, v2 = v2)
-        elif type_kernel == 'Wendland':
-            return Wendland(params, u, v, u2 = u2, v2 = v2)
-
-    def set_guess(self, guess):
+    def set_x0(self, guess):
         """
         Setter of the initial guess for the visibility fitting.
         Parameters:
@@ -111,15 +99,17 @@ class Frank2D(object):
         """
 
         if guess is not None: # If user provides an initial guess.
-            print("Setting guess...")
+            print("===>  Setting guess...")
             index = self.gridded_data_postprocess["index_weighted"]
             self._x0 = guess[index].flatten()
         else:
             self._x0 = guess
 
-        self._set_guess = True
+        self._set_x0 = True
 
-    def set_fit_method(self, method, x0, maxiter, rtol):
+    def set_fit_method(  self, method_name = 'bicgstab',
+                         method_func = None,
+                         maxiter = 50000, rtol = 1e-8):
         """
         Setter of the fitting method for the iterative solver.
         Parameters:
@@ -144,11 +134,15 @@ class Frank2D(object):
         Weights = data_weighted["weights"]
 
         # Create covariance matrix operator.
-        Kernel = self.get_kernel(self._kernel_info, u, v)
+        kernel_type = self._kernel_info["type"]
+        kernel_params = self._kernel_info["params"]
+        kernel_func = self.get_kernel(kernel_type)
+        self._kernel = kernel_func(kernel_params, u, v)
 
         self._solver = IterativeSolverMethod(u, v, Vis, Weights,
-                                             Kernel,
-                                             method = method, 
+                                             self._kernel,
+                                             method_name = method_name,
+                                             method_func = method_func, 
                                              x0 = self._x0,
                                              maxiter = maxiter,
                                              rtol = rtol)
@@ -168,7 +162,7 @@ class Frank2D(object):
         Weights : array, size (N2, 1), unit: 1/Jy^2
             Gridded weights.
         """
-        print("Setting gridded data...")
+        print("===>  Setting gridded data...")
 
         self._gridded_data = {"u": u, "v": v, "vis": Vis, "weights": Weights}
 
@@ -182,7 +176,7 @@ class Frank2D(object):
         MAP_estimator : MAPEstimator object
             MAPEstimator object containing the method to compute the MAP.
         """
-        print("Setting MAP estimator...")
+        print("===>  Setting MAP estimator...")
 
         if isinstance(MAP_estimator, MAPEstimator) is False:
             raise ValueError("MAP_estimator must be an instance of MAPEstimator class.")
@@ -211,7 +205,7 @@ class Frank2D(object):
         None
         """
         if not self._set_gridded_data:
-            grid = Gridding(self._Rmax, self._FT, self._Geometry)
+            grid = Gridding(self._Rmax, self._FT)
             try:
                 u = data["u"]
                 v = data["v"]
@@ -229,37 +223,10 @@ class Frank2D(object):
         """
         Postprocess the gridded visibility data by separating weighted and non-weighted data.
         """
-        u_gridded = self._gridded_data['u']
-        v_gridded = self._gridded_data['v']
-        vis_gridded = self._gridded_data['vis']
-        weights_gridded = self._gridded_data['weights']
-
-        W = weights_gridded.reshape(self._Nx, self._Ny)
-        mask = (W != 0)
-
-        r = mask.ravel(order="C")
-        index_w  = np.flatnonzero(r)
-        index_uw = np.flatnonzero(~r)  
-
-        # data with weights != 0.
-        u_weighted = u_gridded[index_w]
-        v_weighted = v_gridded[index_w]
-        vis_weighted  = vis_gridded[index_w]
-        weights_weighted = weights_gridded[index_w]
-
-        # data with weights == 0.
-        u_unweighted = u_gridded[index_uw]
-        v_unweighted = v_gridded[index_uw]
-        vis_unweighted  = vis_gridded[index_uw]
-        weights_unweighted = weights_gridded[index_uw]
-
-        data_w = {"u": u_weighted, "v": v_weighted, "vis": vis_weighted, "weights": weights_weighted}
-        data_uw = {"u": u_unweighted, "v": v_unweighted, "vis": vis_unweighted, "weights": weights_unweighted}
-    
-        self._gridded_data_postprocess = {"weighted": data_w, "unweighted": data_uw,
-                                           "index_weighted": index_w, "index_unweighted": index_uw }
+        self._PostProcess = PostProcess(self._gridded_data, self._Nx, self._Ny)
+        self._gridded_data_postprocess = self._PostProcess.separate_data()
       
-    def build_full_visibility_model(self):
+    def build_full_model(self):
         """
         Build the full visibility model from the weighted and non-weighted solution.
         Return
@@ -268,49 +235,21 @@ class Frank2D(object):
             Full visibility model on a Nx x Ny grid.
         """
         print("Building full visibility model...")
-        start_time = time.time()
 
-        index_w = self._gridded_data_postprocess["index_weighted"]
-        data_w = self._gridded_data_postprocess["weighted"]
-        u_w = data_w["u"]
-        v_w = data_w["v"]
-        vis_w = data_w["vis"]
-        weights_w = data_w["weights"]
+        kernel = self.get_kernel(self._kernel_info["type"])
+        kernel_params = self._kernel_info["params"]
 
-        Kernel1 = self.get_kernel(self._kernel_info, u_w, v_w)
-        S11 = Kernel1.sparse()
-
-        index_uw = self._gridded_data_postprocess["index_unweighted"]
-        data_uw = self._gridded_data_postprocess["unweighted"]
-        u_uw = data_uw["u"]
-        v_uw = data_uw["v"]
-        vis_uw = data_uw["vis"]
-        weights_uw = data_uw["weights"]
-        Kernel2 = self.get_kernel(self._kernel_info, u_w, v_w, u2 = u_uw, v2 = v_uw) 
-        S_12_T = Kernel2.sparse()
-
-        # Build full visibility model.
-        V1 = S11.matvec(self._sol_visibility_weighted)
-        V2 = S_12_T.matvec(self._sol_visibility_weighted)
-
-        V_full = np.zeros((self._Nx, self._Ny), dtype="c16")
-
-        data_coords_w = np.unravel_index(index_w, (self._Nx, self._Ny))
-        data_coords_uw = np.unravel_index(index_uw, (self._Nx, self._Ny))
-
-        V_full[data_coords_w] = V1
-        V_full[data_coords_uw] = V2
-
-        end_time = time.time()
-        execution_time = end_time - start_time
-        print(f'--> times building full visibility model = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
+        V_full = self._PostProcess.build_vis_model(kernel, kernel_params,
+                                                   self._sol_visibility_weighted)
 
         return V_full
 
-    def fit(self, data = None,
-            type_kernel = 'Wendland', kernel_params = {'m': -2, 'c': 1e8, 'l': 5e4},
-            method = 'bicgstab', x0 = None, maxiter = 50000, rtol = 1e-9,
-            hermitian = True, run_from_scratch = True):
+    def fit(self, 
+            data = None,
+            kernel_type = 'wend', kernel_params = {'m': -2, 'c': 1e8, 'l': 5e4},
+            method_name = 'bicgstab', method_func = None,
+            x0 = None, maxiter = 50000, rtol = 1e-8,
+            hermitian = True, run_from_scratch = False):
         """
         Fit the visibility data using Gaussian Processes.
         Parameters:
@@ -325,12 +264,15 @@ class Frank2D(object):
                 Visibility data.
             Weights : 1D array, unit: 1/Jy^2
                 Weights of the visibility data.
-        type_kernel : str
-            Type of kernel to use ('SquareExponential' or 'Wendland').
+        kernel_type : str
+            Type of kernel to use ('sqexp' or 'wend').
         kernel_params : dict
             Parameters for the kernel, amplitude (given by m and c) and length scale (l).
-        method : str
+        method_name : str
             Iterative solver method to use ('cg', 'bicgstab', etc.).
+        method_func : function
+            Custom iterative solver function. If None, default  is use the method name.
+            This is the priority over method_name.
         x0 : array
             Initial guess for the iterative solver.
         maxiter : int
@@ -345,7 +287,7 @@ class Frank2D(object):
             i.e., running from after gridding.
         """
         if not self._set_gridded_data or data is not None:
-            if not data: # empty dict.
+            if not data:
                 raise ValueError("If gridded data is not set, u, v, Vis and Weights must be provided.")
             try:
                 u = data["u"]
@@ -357,23 +299,25 @@ class Frank2D(object):
             self.process_vis(data, hermitian = hermitian)
 
         if run_from_scratch:
-            self._set_guess = False
+            self._set_x0 = False
             self._set_kernel = False
             self._set_fit_method = False
 
-        if not self._set_guess:
-            self.set_guess(x0)
+        if not self._set_x0:
+            self.set_x0(x0)
             
         if not self._set_kernel:
-            self.set_kernel(type_kernel, kernel_params)
+            self.set_kernel(kernel_type = kernel_type,
+                            kernel_params = kernel_params)
 
         if not self._set_fit_method:
-            self.set_fit_method(method, x0, maxiter, rtol)
+            self.set_fit_method( method_name = method_name,
+                                 method_func = method_func,
+                                 maxiter = maxiter, rtol = rtol)
             
         self._solver.run()
-        self._sol_visibility_weighted = self._solver.sol
-        self._sol_visibility = self.build_full_visibility_model()
-
+        self._sol_visibility_weighted = self._solver.solution
+        self._sol_visibility = self.build_full_model()
         self._sol_intensity = self.transform(self._sol_visibility)
 
     def search_MAP(self, data=None,
@@ -386,7 +330,7 @@ class Frank2D(object):
             data = self._gridded_data
 
         if not self._set_MAP_estimator:
-            self._MAP_estimator = MAPEstimator(self._Rmax * rad_to_arcsec, self._Geometry, N=N)
+            self._MAP_estimator = MAPEstimator(self._Rmax, N=N)
             self._set_MAP_estimator = True
 
         self._MAP_estimator.optimize(data, initial_guess)
@@ -395,27 +339,33 @@ class Frank2D(object):
     def transform(self, vis, direction = "backward"):
         return self._FT.fast_transform(vis, direction = direction)
 
-    def frank1d(self, data = None,
-                alpha = 1.05, w_smooth = 1e-3, n_pts = 300,
-                rout = None, geom = None):
+    def frank1d(self, geom,
+                data = None, rout = None,
+                alpha = 1.05, w_smooth = 1e-3, n_pts = 300 ):
         """
         Perform a 1D Frank fit on the visibility data.
         Parameters:
         -----------
-        data : dict, optional
-            Dictionary containing 'u', 'v', 'vis' and 'weights' keys.
-        Weights : 1D array, unit: 1/Jy^2
-            Weights of the visibility data.
-        alpha : float
-            Regularization hyparameter for Frank.
-        w_smooth : float
-            Smoothing weight hyperparameter for Frank.
-        n_pts : int
-            Number of radial points for Frank.
-        rout : float
-            Maximum radius for Frank in arcseconds.
         geom : Geometry object
             Geometry object containing source geometry parameters.
+        data : dict
+            Dictionary containing 'u', 'v', 'vis' and 'weights' keys.
+            u : 1D array, unit: lambda
+                u coordinates of the visibility data.
+            v : 1D array, unit: lambda
+                v coordinates of the visibility data.
+            Vis : 1D array,  unit: Jy
+                Visibility data.
+            Weights : 1D array, unit: 1/Jy^2
+                Weights of the visibility data.
+        rout : float
+            Outer radius for the 1D Frank fit in arcseconds.
+        alpha : float
+            Power-law index for the visibility fitting.
+        w_smooth : float
+            Smoothing weight for the visibility fitting.
+        n_pts : int
+            Number of points for the 1D Frank fit.
 
         Returns:
         --------
@@ -424,18 +374,18 @@ class Frank2D(object):
         """
         print('Performing 1D Frank fit...' + '\n')
         print(r'+ $\alpha$ = ', str(alpha), r' and $w_{smooth}$ = ', str(w_smooth) + '\n')
-        print( '+ N = ', str(n_pts), r' and $R_{max}$ = ', str(rout))
-        if geom is None:
-            geom = self._Geometry
+        print( '+ N = ', str(n_pts))
         inc, pa, dra, ddec = geom._inc, geom._pa, geom._dra, geom._ddec
         if rout is None:
+            print("Using Rmax from Frank2D object...")
             rout = self._Rmax*rad_to_arcsec
         geom_f1d = SourceGeometry(inc= inc, PA= pa, dRA= dra, dDec= ddec)
         FF = FrankFitter(rout, n_pts, geom_f1d, alpha = alpha, weights_smooth = w_smooth)
 
         if  data is None:
             if not self._set_gridded_data:
-                self.preprocess_vis(u, v, Vis, Weights)
+                raise ValueError("Gridded data is not set, u, v, Vis and Weights must be provided.")
+            print("Using existing visibility data...")
             u, v = self._gridded_data["u"], self._gridded_data["v"]
             vis = self._gridded_data["vis"]
             weights = self._gridded_data["weights"]
@@ -447,6 +397,26 @@ class Frank2D(object):
         self._sol_f1d = FF.fit(u, v, vis, weights)
 
         return self._sol_f1d
+
+    @property
+    def Nx(self):
+        """ Number of collocation points in x dimension."""
+        return self._Nx
+    
+    @property
+    def Ny(self):
+        """ Number of collocation points in y dimension."""
+        return self._Ny
+    
+    @property
+    def dx(self):
+        """ Cellsize in x dimension in arcseconds."""
+        return (2*self.Rmax)/self.Nx
+    
+    @property
+    def dy(self):
+        """ Cellsize in y dimension in arcseconds."""
+        return (2*self.Rmax)/self.Ny
     
     @property
     def gridded_data(self):
@@ -455,7 +425,10 @@ class Frank2D(object):
 
     @property
     def u(self):
-        """ u - 1d collocation points in lambda (0 centered)."""
+        """ 
+        u - 1d collocation points in lambda (0 centered).
+        (N, 1) array.
+        """
         return self._FT.u
     
     @property
@@ -465,7 +438,10 @@ class Frank2D(object):
     
     @property
     def v(self):
-        """ v 1d - collocation points in lambda (0 centered)."""
+        """ 
+        v 1d - collocation points in lambda (0 centered).
+        (N, 1) array.
+        """
         return self._FT.v
     
     @property
@@ -502,6 +478,11 @@ class Frank2D(object):
     def Rmax(self):
         """ Maximum value of the x coordinate in arcseconds."""
         return self._Rmax*rad_to_arcsec
+
+    @property
+    def cellsize(self):
+        """ Cellsize in arcseconds."""
+        return (2*self._Rmax*rad_to_arcsec)/self._N
     
     @property
     def intensity_model(self):
@@ -512,11 +493,6 @@ class Frank2D(object):
     def FT(self):
         """ FourierTransform2D object."""
         return self._FT
-
-    @property
-    def Geometry(self):
-        """ Geometry object."""
-        return self._Geometry
 
     @property
     def MAPEstimator(self):
@@ -533,13 +509,15 @@ class Frank2D(object):
         return self._MAP
     
     @property
-    def N(self):
-        """ Number of collocation points in each dimension."""
-        return self._N
-
-    @property
     def sol_f1d(self):
         """ 1D Frank solution."""
         if self._sol_f1d is None:
             raise ValueError("No 1D Frank solution found. Run frank1d first.")
         return self._sol_f1d
+
+    @property
+    def solver(self):
+        """ IterativeSolverMethod object."""
+        if self._solver is None:
+            raise ValueError("No solver found. Set it first.")
+        return self._solver

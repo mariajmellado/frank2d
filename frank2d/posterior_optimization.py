@@ -12,10 +12,10 @@ import abc
 import matplotlib.pyplot as plt
 
 """
-This module is based in classes and functions contain in Frankenstein-1D algorithm for fitting visibilities.
+This module is based in classes and functions contained in Frankenstein-1D algorithm for fitting visibilities.
 """
 class MAPEstimator(object):
-    def __init__(self, Rmax, Geometry, N = 50):
+    def __init__(self, Rmax, Geometry, N = 50, minimizer = Powell):
         """
         Maximum A Posteriori Estimator for the parameters of the Gaussian Process
         Params
@@ -30,11 +30,10 @@ class MAPEstimator(object):
         """
         self._Rmax = Rmax
         self._N = N
-        self._Geometry = Geometry
-        self._FF = FourierBesselFitter(self._Rmax*rad_to_arcsec, N, self._Geometry)
+        self._FF = FourierBesselFitter(self._Rmax, N)
 
         self._set_minimizer = False
-        self._minimizer = Powell
+        self._minimizer = minimizer
 
         # Optimization results.
         self._times = []
@@ -160,7 +159,7 @@ class MAPEstimator(object):
         self._iter = 0
         GM = self._GM
 
-        params = {'m': 0, 'logc': -2, 'logl': 4}
+        params = {'m': 0, 'logc': -2, 'logl': 4} # REVIEW
         p0 = GM.minus_log_posterior(params)
         jDj0, logdetS0, logdetD0 = GM.jDj, GM.logdetS, GM.logdetD
         end_time = time.time()
@@ -216,45 +215,47 @@ class MAPEstimator(object):
     
     @property
     def GaussianModel(self):
-        """Return the GaussianModel object."""
+        """Return the GaussianModel object which refers to the Gaussian Process"""
         return self._GM
+
+    @property
+    def results_opt(self):
+        """Return the results of the posterior optimization."""
+        return {
+            'm': self._ms,
+            'c': self._cs,
+            'l': self._ls,
+            'jDj': self._jDjs,
+            'logdetD': self._logdetDs,
+            'logdetS': self._logdetSs,
+            'minus_log_posterior': self._minus_log_posteriors,
+        }
 
 class FourierBesselFitter(object):
     """
     Fourier-Bessel series model for fitting visibilities
     """
 
-    def __init__(self, Rmax, N, geometry=None, nu=0, block_data=True,
-                 assume_optically_thick=True, scale_height=None,
-                 block_size=10 ** 5, verbose=True, geometry_on = True):
+    def __init__(self, Rmax, N, block_data=True,
+                 block_size=10 ** 5, verbose=True):
         
-        
-        Rmax /= rad_to_arcsec
+        # Assuming optically thick disc by default.
+        # Thus, scale height = 0.
 
-        self._geometry = geometry
-
-        self._2DFT = FourierTransform2D(Rmax, N, geometry)
+        self._2DFT = FourierTransform2D(Rmax, N)
         self._Rmax = Rmax*rad_to_arcsec
 
-        if assume_optically_thick:
-            if scale_height is not None:
-                raise ValueError("Optically thick models must have zero "
-                                 "scale-height")
-            model = 'opt_thick'
-        elif scale_height is not None:
-            model = 'debris'
-        else:
-            model = 'opt_thin'
-
-        self._vis_map = VisibilityMapping(self._2DFT, geometry, 
-                                          model, geometry_on = geometry_on ,scale_height=scale_height,
-                                          block_data=block_data, block_size=block_size,
-                                          check_qbounds=False, verbose=verbose)
+        self._vis_map = VisibilityMapping(self._2DFT,
+                                          block_data=block_data,
+                                          block_size=block_size,
+                                          check_qbounds=False,
+                                          verbose=verbose)
 
         self._verbose = verbose
 
-        self._info  = {'Rmax' : self._2DFT.Rmax * rad_to_arcsec,
-                       'N' : self._2DFT.size
+        self._info  = {
+                        'Rmax' : self._2DFT.Rmax * rad_to_arcsec,
+                        'N' : self._2DFT.size
                        }
 
     def preprocess_visibilities(self, u, v, V, weights):
@@ -269,10 +270,6 @@ class FourierBesselFitter(object):
         self._M = mapping['M']
         self._j = mapping['j']
         self._V = mapping['V']
-        self._Wvalues = mapping['W']
-        self._identities = mapping['identities']
-
-        self._H0 = mapping['null_likelihood']
 
     def fit(self, u, v, V, weights):
         r"""
@@ -300,50 +297,18 @@ class VisibilityMapping:
       3. An opticall thin disc with a known Gaussian verictal structure.
     All models are axisymmetric.
     """
-    def __init__(self, DFT, geometry,  
-                 vis_model='opt_thick', geometry_on = True, scale_height=None, block_data=True,
+    def __init__(self, DFT, block_data=True,
                  block_size=10 ** 5, check_qbounds=True, verbose=True):
-        
-        _vis_models = ['opt_thick', 'opt_thin', 'debris']
-        if vis_model not in _vis_models:
-            raise ValueError(f"vis_model must be one of {_vis_models}")
-
         # Store flags
-        self._vis_model = vis_model
         self.check_qbounds = check_qbounds
         self._verbose = verbose 
-        self.geometry_on = geometry_on
 
         self._chunking = block_data
         self._chunk_size = block_size
 
         self._2DFT = DFT
-        self._geometry = geometry
-
-        # Check for consistency and report the model choice.
-        self._scale_height = None
-        if self._vis_model == 'opt_thick':
-            if self._verbose:
-                logging.info('  Assuming an optically thick model (the default): '
-                             'Scaling the total flux to account for the source '
-                             'inclination')
-        elif self._vis_model == 'opt_thin':
-            if self._verbose:
-                logging.info('  Assuming an optically thin model: *Not* scaling the '
-                             'total flux to account for the source inclination')
-        elif self._vis_model == 'debris':
-            if scale_height is None:
-                raise ValueError('You requested a model with a non-zero scale height'
-                                 ' but did not specify H(R) (scale_height=None)')
-            self._scale_height = scale_height(self.r)
-            self._H2 = 0.5*(2*np.pi*self._scale_height / rad_to_arcsec)**2
-            
-            if self._verbose:
-                logging.info('  Assuming an optically thin model but geometrically '
-                             'thick model: *Not* scaling the total flux to account for '
-                             'the source inclination')
    
-    def map_visibilities(self, u, v, V, weights, frequencies=None, geometry=None):                         #--------> 3
+    def map_visibilities(self, u, v, V, weights):
         r"""
         Compute the matrices :math:`M` abd :math:`j` from the visibility data.
 
@@ -353,9 +318,6 @@ class VisibilityMapping:
              - 0.5*np.sum(V * weights * V):math:`
         
         """
-
-        if geometry is None:
-            geometry = self._geometry
 
         if self._verbose:
             logging.info('    Building visibility matrices M and j')
@@ -367,15 +329,10 @@ class VisibilityMapping:
 
         w = (np.ones_like(V) * weights).real
 
-        multi_freq = True
-        if frequencies is None:
-            multi_freq = False
-            frequencies = np.ones_like(V)
+        frequencies = np.ones_like(V)
         channels = np.unique(frequencies)
         Ms = np.zeros([len(channels), self.size, self.size], dtype='f8')
         js = np.zeros([len(channels), self.size], dtype='f8')
-
-        self._identities = []
 
         for i, f in enumerate(channels):
             idx = frequencies == f
@@ -420,29 +377,16 @@ class VisibilityMapping:
         # log-likelihood of a source with I=0.
         H0 = 0.5 * np.sum(np.log(w / (2 * np.pi)) - V * w * V)
 
-        if multi_freq:
-            return {
-                'mult_freq' : True,
-                'channels' : channels,
-                'M' : Ms,
-                'j' : js,
-                'null_likelihood' : H0,
-                'hash' : [True, geometry, self._vis_model, self._scale_height],
-            }
-        else: 
-            return {
-                'mult_freq' : False,
-                'channels' : None,
-                'M' : Ms[0],
-                'j' : js[0],
-                'null_likelihood' : H0,
-                'hash' : [False, geometry, self._vis_model, self._scale_height],
-                'V' : Vi,
-                'W' : wi,
-                'identities': self._identities,
-            }
 
-    def predict_visibilities(self, I, u, v, k=None, geometry=None):
+        return {
+            'M' : Ms[0],
+            'j' : js[0],
+            'V' : Vi,
+            'W' : wi,
+            'null_likelihood' : H0,
+        }
+
+    def predict_visibilities(self, I, u, v, k=None):
         r"""Compute the predicted visibilities given the brightness profile, I
 
         """
@@ -465,33 +409,14 @@ class VisibilityMapping:
             if k is not None:
                 ki = k[start:end]
 
-            H = self._get_mapping_coefficients(ki, ui, vi, geometry)
+            H = self._get_mapping_coefficients(ki, ui, vi)
 
             V.append(np.dot(H, I))
         return np.concatenate(V)
 
-    def _get_mapping_coefficients(self, ks, u, v, geometry=None, inverse=False):
+    def _get_mapping_coefficients(self, ks, u, v, inverse=False):
         """Get :math:`H(q)`, such that :math:`V(q) = H(q) I_\nu`"""
         scale = 1
-        if self._vis_model == 'opt_thick':
-            # Optically thick & geometrically thin
-            if geometry is None:
-                if not self.geometry_on:
-                    scale = 1
-                else:   
-                    geometry = self._geometry
-                    #scale = np.cos(geometry.inc * deg_to_rad)
-                    scale = 1
-
-        elif self._vis_model == 'opt_thin':
-            # Optically thin & geometrically thin
-            scale = 1
-
-        elif self._vis_model == 'debris':
-            # Optically thin & geometrically thick
-            scale = np.exp(-np.outer(ks*ks, self._H2))
-        else:
-            raise ValueError("model not supported. Should never occur.")
         if inverse:
             scale = np.atleast_1d(1/scale).reshape(1,-1)
             direction='backward'
@@ -540,27 +465,17 @@ class VisibilityMapping:
     @property
     def q(self):
         r"""Frequency points, unit = :math:`\lambda`"""
-        #return self._DHT.q
         return self._2DFT.q
 
     @property
     def Qmax(self):
         r"""Maximum frequency, unit = :math:`\lambda`"""
-        return self._DHT.Qmax
+        return self._2DFT.Qmax
 
     @property
     def size(self):
         """Number of points in reconstruction"""
-        #return self._DHT.size
         return self._2DFT.size
-
-    @property
-    def scale_height(self):
-        "Vertial thickness of the disc, unit = arcsec"
-        if self._scale_height is not None:
-            return self._scale_height
-        else:
-            return None
 
 class GaussianModel:
     r"""
@@ -614,7 +529,6 @@ class GaussianModel:
     """
 
     def __init__(self, DFT, M, j, Rmax):
-
         self._2DFT = DFT
         self._N = int(np.sqrt(M.shape[0]))
         self._Rmax = Rmax
@@ -679,45 +593,41 @@ class GaussianModel:
         Params
         ------
         param : dict, optional
-            Dictionary containing the parameters m, log_c, log_l.
+            Dictionary containing the parameters m, log_c (or c), log_l (or l).
             If None, use the current values of the class.
         """
 
         if param is not None:
             m = param['m']
-            c = 10**param['logc']
-            l = 10**param['logl']
+            if 'logc' in param:
+                c = 10**param['logc']
+            elif 'c' in param:
+                c = param['c']
+            if 'logl' in param:
+                l = 10**param['logl']
+            elif 'l' in param:
+                l = param['l']
         else:
             m = self.m
             c = 10**self.log_c
             l = 10**self.log_l
 
         # Calculate S in real space.
-        #start_time = time.time()
         S_real  = self.calculate_S_real_space(m, c, l)
-        #print("+ %.2f seconds for S_real " % (time.time() - start_time))
 
         # Calculate the inverse of S with Cholesky decomposition.
-        #start_time = time.time()
+
         self._Sinv = self.calculate_S_inv_cholesky(S_real)
-        #print("+ %.2f seconds for S_real_inv " % (time.time() - start_time))
 
         # Calculate Dinv.
         self._Dinv = self._M + self._Sinv 
 
         # Calculate mu.
-        #start_time = time.time()
         self._solve_mu()
-        #print("+ %.2f seconds for mu " % (time.time() - start_time))
 
         # Calculate the log determinants.
-        #start_time = time.time()
         self._logdetS = np.linalg.slogdet(S_real)[1]
-        #print("+ %.2f seconds for log|S|  " % (time.time() - start_time))
-
-        #start_time = time.time()
         self._logdetD = -np.linalg.slogdet(self._Dinv)[1]
-        #print("+ %.2f seconds for log|D| " % (time.time() - start_time))
 
         # Calculate j^T D j = j^T mu
         self._jDj = np.dot(np.transpose(self._j), self._mu)
@@ -817,3 +727,7 @@ class GaussianModel:
         """Return the current log determinant of S."""
         return self._logdetS
     
+    @property
+    def DFT2(self):
+        """Return the FourierTransform2D object."""
+        return self._2DFT
