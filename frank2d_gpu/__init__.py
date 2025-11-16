@@ -1,7 +1,7 @@
 from .constants import rad_to_arcsec, deg_to_rad
 from .fourier2d_gpu import FourierTransform2D
 from .geometry import Geometry
-from .preprocess_vis_gpu import Gridding
+from .process_vis_gpu import Gridding
 from .frank2d_gpu import Frank2D
 from .fitting_gpu import IterativeSolverMethod
 from .gaussian_process import Wendland

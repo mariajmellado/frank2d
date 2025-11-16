@@ -18,10 +18,19 @@ This module contains classes for plotting the results of Frank's 2D algorithm.
 
 class Plot(object):
     def __init__(self, Frank2D, Geometry):
-        self._Frank2d = Frank2D
+        """
+        Class for plotting the results of Frank2D.
+        Parameters
+        ----------
+        Frank2D : Frank2D object
+            The Frank2D object containing the results of the model.
+        Geometry : Geometry object
+            The Geometry object for the source.
+            This is necessary to apply phas shifts and deprojections.
+        """
+        self._Frank2D = Frank2D
         self._Geometry = Geometry
         self._FT = Frank2D._FT
-        
         self._Nx = self._Ny = Frank2D._N
         
         self._u_input = Frank2D.gridded_data['u'].get()
@@ -29,16 +38,16 @@ class Plot(object):
         self._vis_input = Frank2D.gridded_data['vis'].get()
         self._weights_input = Frank2D.gridded_data['weights'].get()
 
-        self._u_model = self._Frank2d.u_grid.get()
-        self._v_model = self._Frank2d.v_grid.get()
-        self._u_model_1d = self._Frank2d.u.get()
-        self._v_model_1d = self._Frank2d.v.get()
+        self._u_model = Frank2D.u_grid.get()
+        self._v_model = Frank2D.v_grid.get()
+        self._u_model_1d = Frank2D.u.get()
+        self._v_model_1d = Frank2D.v.get()
         self._vis_model = Frank2D.visibility_model.get()
 
-        self._x_model = (self._Frank2d.x_grid*rad_to_arcsec).get()
-        self._y_model = (self._Frank2d.y_grid*rad_to_arcsec).get()
-        self._x_model_1d = (self._Frank2d.x*rad_to_arcsec).get()
-        self._y_model_1d = (self._Frank2d.y*rad_to_arcsec).get()
+        self._x_model = (Frank2D.x_grid*rad_to_arcsec).get()
+        self._y_model = (Frank2D.y_grid*rad_to_arcsec).get()
+        self._x_model_1d = (Frank2D.x*rad_to_arcsec).get()
+        self._y_model_1d = (Frank2D.y*rad_to_arcsec).get()
         self._int_model = Frank2D.intensity_model.real.get()
 
         self._f1d_profile = None
@@ -52,11 +61,19 @@ class Plot(object):
             return array
         else:
             return array.get()
+
+    def set_result(self, key, value):
+        self._results[key] = value
         
-    def visibility(self, kind = 'model',
-                   title=r'$log |Vis|$', fig_size = 3,
+    def visibility(self,
+                   kind = 'model',
+                   title=r'$V_{model}^{F2D}$',
+                   fig_size = 6, zoom = 1,
                    vmin = -9, vmax = -2,
                    phase_shift = True, deproject = False):
+        
+        if zoom <= 0:
+            raise ValueError("zoom must be > 0")
         
         Nx, Ny = self._Nx, self._Ny
         geom = self._Geometry
@@ -89,24 +106,30 @@ class Plot(object):
                        np.log(np.abs(vis)),
                        cmap="magma",
                        vmin=-10, vmax=-2)
-        plt.xlabel(r'u [1e6 $\lambda$]')
-        plt.ylabel(r'v [1e6 $\lambda$]')
+        plt.xlabel(r'u [$\lambda$]')
+        plt.ylabel(r'v [$\lambda$]')
         plt.title(title)
         cmap = plt.colorbar(shrink=0.8)
-        cmap.set_label(r'log|$V_{model}$| [Jy]', size=10)
+        cmap.set_label(r'log|V| [Jy]', size=10)
         
-        plt.xlim(u.max(), u.min())
-        plt.ylim(v.max(), v.min())
+        plt.xlim(u.max()/zoom, u.min()/zoom)
+        plt.ylim(v.max()/zoom, v.min()/zoom)
         
         plt.gca().set_aspect(1)
         plt.gca().invert_yaxis()
         plt.show()
     
-    def intensity(self, title= r'$I_{Model}$', fig_size = 6, vmin = 0, vmax = 4e10, gamma = 0.45,
-                  phase_shift = True, deproject = False):
+    def intensity(self,
+                  title= r'$I_{model}^{F2D}$',
+                  fig_size = 6, zoom = 1,
+                  vmin = 0, vmax = 4e10, gamma = 0.45,
+                  phase_shift = True, deproject = False ):
+        
+        if zoom <= 0:
+            raise ValueError("zoom must be > 0")
         
         Nx, Ny = self._Nx, self._Ny
-        f2d = self._Frank2d
+        f2d = self._Frank2D
         geom = self._Geometry
         
         I = self._int_model
@@ -117,7 +140,8 @@ class Plot(object):
             # Only in this scheme (East of North) makes sense to do the phase shifting.
             vis_ = self._vis_model
             vis = geom.apply_phase_shift(-u_grid, -v_grid, vis_)
-            I = self.to_cpu(f2d.transform(vis).real)
+            I = f2d.transform(vis).real
+            I = self.to_cpu(I)
         
         # The signs are because the convention: East of North.
         x = -self._x_model
@@ -133,15 +157,13 @@ class Plot(object):
                        I,
                        cmap="magma",
                        norm=norm)
-        plt.xlabel(r'x ["]')
-        plt.ylabel(r'y ["]')
+        plt.xlabel(r'RA ["]')
+        plt.ylabel(r'Dec ["]')
         cmap = plt.colorbar(shrink=0.8)
         plt.title(title)
         cmap.set_label(r'I [Jy/sr]', size=10)
-        
-        plt.xlim(x.max(), x.min())
-        plt.ylim(y.max(), y.min())
-        
+        plt.xlim(x.max()/zoom, x.min()/zoom)
+        plt.ylim(y.max()/zoom, y.min()/zoom) 
         plt.gca().set_aspect(1)
         plt.gca().invert_yaxis()
         plt.show()
@@ -178,12 +200,14 @@ class Plot(object):
         last  = x[-1] + (x[-1] - x[-2]) / 2.0
         return np.r_[first, mids, last]
 
-    def  visibility_profile(self, title = r'$Visibility_{Model}$', 
+    def visibility_profile( self, 
+                            title = r'$Visibility_{Model}$',
+                            fig_size = (10,3),
                             input = None, frank1d = False, weighted = True,
                             bins = 300,
                             phase_shift = True, deproject = True):
 
-        f2d = self._Frank2d
+        f2d = self._Frank2D
         geom = self._Geometry
         # model
         u_model = self._u_model
@@ -228,16 +252,18 @@ class Plot(object):
 
         # f1d
         if frank1d:
-            #frank1d
-            u_input_f1d = u_input_g
-            v_input_f1d = v_input_g
-            vis_input_f1d = vis_input_g
-            weights_input_f1d = weights_input_g
+           if self._f1d_profile is None:
+            print("Frank1D profile not set." 
+                  "Using gridded visibilities as input.")
+
+            data = {
+                'u': u_input_g,
+                'v': v_input_g,
+                'vis': vis_input_g,
+                'weights': weights_input_g
+            }
             
-            sol = f2d.frank1d(  u = u_input_f1d, v = v_input_f1d,
-                                vis = vis_input_f1d, weights = weights_input_f1d,
-                                n_pts = self._Nx
-                            )
+            sol = f2d.frank1d(data = data, n_pts = self._Nx)
 
             if deproject:
                 vis_f1d = sol.predict_deprojected(q = q)
@@ -256,7 +282,7 @@ class Plot(object):
                                    10**4)
         
         
-        plt.figure(figsize=(10,4))
+        plt.figure(figsize=fig_size)
         # Raw visibilities ---------------------------------------------------------
         cs, ms = ['#a4a4a4', 'k'], ['.', 'x']
         bin_widths = [1e3, 1e5]
@@ -305,18 +331,17 @@ class Plot(object):
 
     def intensity_profile(self, title= r'Brightness profile', 
                           clean = False,
-                          frank1d = True,
+                          frank1d = False,
                           bins = 300, Rmax = None,
                           resol_f2d = 0, resol_f1d = 0, 
-                          log_scale = True, 
-                          x_lims = None, y_lims = None):
+                          log_scale = True, fig_size = (10,3),
+                          x_lims = None, y_lims = None, 
+                          save_fig = False):
 
-        f2d = self._Frank2d
+        # TODO: add option to change figsize.
+        f2d = self._Frank2D
         geom = self._Geometry
         inc, pa, dra, ddec = geom.inc, geom.pa, geom.dra, geom.ddec
-
-        beam_for_f2d = None
-        beam_for_f1d = None
 
         if clean:
             if self._fits_file is None:
@@ -368,7 +393,8 @@ class Plot(object):
         
         # phase shift
         vis = geom.apply_phase_shift(-u_model, -v_model, vis_model) # the East of North convention.
-        I = self.to_cpu(f2d.transform(vis).real)
+        I = f2d.transform(vis).real
+        I = self.to_cpu(I)
         self._int_model_shifted = I
 
         # deproject
@@ -401,7 +427,7 @@ class Plot(object):
             if clean:
                 y_lims = (1e-6, 5e-3)
 
-        plt.figure(figsize=(10,4))
+        plt.figure(figsize=fig_size)
         if clean:
             area = clean_area
             #  CLEAN --------------------------------------------------------------------
@@ -417,7 +443,11 @@ class Plot(object):
                 I_f1d_convolved = convolve_profile(r_f1d, I_f1d, inc, pa, beam_for_f1d)
                 I_f1d_convolved *= area # Jy/beam
                 plt.plot(r_f1d, I_f1d_convolved, color = "red", label = r'frank1d')
+                self.set_result('f1d_profile', {'r': r_f1d, 'I': I_f1d_convolved})
         
+            self.set_result('clean_profile', {'r': x_clean, 'I': y_clean, 'dI': dy_clean})
+            self.set_result('f2d_profile', {'r': r_model_1d, 'I': I_model_1d_convolved})
+
             plt.ylabel(r'log($I_\nu$) [Jy/beam]', size=10)
             plt.xlabel('Radius ["]', size=10)
             plt.legend(fontsize=12)
@@ -425,14 +455,18 @@ class Plot(object):
                 plt.yscale('log')
             plt.ylim(y_lims)
             plt.xlim(x_lims)
+            if save_fig:
+                plt.savefig('intensity_profile.png')
             plt.show()
         else:
             # frank1D -------------------------------------------------------------------
             if frank1d:
                 plt.plot(r_f1d, I_f1d, color = "red", label = r'frank1d')
+                self.set_result('f1d_profile', {'r': r_f1d, 'I': I_f1d})
     
             # frank2D -------------------------------------------------------------------
             plt.plot(r_model_1d, I_model_1d, color = 'blue', ls ='--', label = r'frank2d')
+            self.set_result('f2d_profile', {'r': r_model_1d, 'I': I_model_1d})
 
             plt.xlabel('Radius ["]', size = 10)
             plt.ylabel(r'log($I_\nu$) [$10^{10}$ Jy sr$^{-1}$]', size = 10)
@@ -442,6 +476,8 @@ class Plot(object):
             if log_scale:
                 plt.yscale('log')
             plt.legend()
+            if save_fig:
+                plt.savefig('intensity_profile.png')
             plt.show()
 
     def stats_optimization(self, MAP_estimator = None):
@@ -453,7 +489,7 @@ class Plot(object):
             The MAPEstimator object used in the optimization.
             If not provided, it will use the one from the Frank2D object.
         """
-        f2d = self._Frank2d
+        f2d = self._Frank2D
         if MAP_estimator is None:
             if f2d._MAP_estimator is None:
                 raise ValueError("MAPEstimator object not provided.")
@@ -508,7 +544,7 @@ class Plot(object):
         fig.tight_layout()
         plt.show()
     
-    def MAP_power_spectrum(self, data, MAP_estimator = None, params = None):
+    def MAP_power_spectrum(self, data, MAP_estimator = None):
         r"""
         Plot the power spectrum of the best parameters found in the posterior optimization.
         Params
@@ -520,14 +556,11 @@ class Plot(object):
             The MAPEstimator object used in the optimization.
             If not provided, it will use the one from the Frank2D object.
         """
-        f2d = self._Frank2d
+        f2d = self._Frank2D
         if MAP_estimator is None:
-            if params is None:
-                if f2d._MAP_estimator is None:
-                    raise ValueError("MAPEstimator object not provided.")
-                self._MAP_estimator = f2d._MAP_estimator
-            else:
-                pass
+            if f2d._MAP_estimator is None:
+                raise ValueError("MAPEstimator object not provided.")
+            self._MAP_estimator = f2d._MAP_estimator
         else:
             if isinstance(MAP_estimator, MAPEstimator) is False:
                 raise ValueError("MAP_estimator must be an instance of MAPEstimator class.")
@@ -555,12 +588,9 @@ class Plot(object):
         def linear_power_spectrum(logx, m, c):
             return m*logx + np.log10(c)
 
-        if params is not None:
-            m = params['m']
-            c = params['c']
-        else:
-            m = ME.MAP['m']
-            c = ME.MAP['c']
+        m = ME.MAP['m']
+        c = ME.MAP['c']
+        P = ME.power_spectrum(baselines, m, c)
 
         lgx = np.log10(np.geomspace(np.sort(baselines)[1], baselines.max(), 1000))
         lgy = linear_power_spectrum(lgx, m, c)
@@ -579,10 +609,27 @@ class Plot(object):
         plt.xlim(5, 6.5)
         plt.show()
 
+    def cg_tolerance(self, fig_size = (7,2)):
+        r"""
+        Plot the conjugate gradient tolerance over iterations.
+        """
+        f2d = self._Frank2D
+        tols = f2d.solver.fit_data['tols']
+
+        iterations = range(len(tols))
+        tols = np.array(tols)
+
+        plt.figure(figsize = fig_size)
+        plt.plot(iterations, tols)
+        plt.yscale('log')
+        plt.xlabel('iterations')
+        plt.ylabel('log tolerance')
+        plt.show()
+    
     @property
     def I_shifted(self):
         if self._int_model_shifted is None:
-            f2d = self._Frank2d
+            f2d = self._Frank2D
             geom = self._Geometry
 
             u_model = self._u_model
@@ -616,3 +663,8 @@ class Plot(object):
     @property
     def Ny(self):
         return self._Ny
+
+    @property
+    def results(self):
+        return self._results
+        

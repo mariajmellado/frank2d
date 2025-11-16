@@ -44,7 +44,7 @@ class FourierTransform2D(object):
         u_shifted_convention = (-u_shifted).ravel(order="C")
         v_shifted_convention = (-v_shifted).ravel(order="C")
 
-        u_shifted = u_shifted.ravel(order="C")  # shape = (N2,1)
+        u_shifted = u_shifted.ravel(order="C") # shape = (N2,1)
         v_shifted = v_shifted.ravel(order="C")
 
         self._Un = u_shifted
@@ -58,14 +58,23 @@ class FourierTransform2D(object):
 
         self._in = True
 
-    def get_collocation_points(self):
-        return cp.array([self._Xn, self._Yn]), cp.array([self._Un, self._Vn])
-
-    def coefficients(self, u=None, v=None, x=None, y=None, direction="forward"):
+    def coefficients(self, u=None, v=None, direction="forward"):
         """
         Compute the coefficients of the 2D-DFT matrix.
         Parameters
         ----------
+        u : 1D array_like
+            Frequency space collocation points along u-axis.
+        v : 1D array_like
+            Frequency space collocation points along v-axis.
+        direction : str
+            Direction of the transform. Can be 'forward' or 'backward'.
+            - forward: from image space to frequency space.
+            - backward: from frequency space to image space.
+        Returns
+        -------
+        H : 2D array_like, shape = (len(u), N2) or (len(v), N2)
+            Coefficient matrix of the 2D-DFT.
         """
         if direction == 'forward':
             # Normalization is dx*dy since we the DFT to be an approximation
@@ -103,6 +112,9 @@ class FourierTransform2D(object):
             with the zero frequency at the center.
         direction : str
             Direction of the transform. Can be 'forward' or 'backward'.
+            Where:
+                - forward: from image space to frequency space.
+                - backward: from frequency space to image space.
         """
         # cp.fft.fft2 assumes the zero frequency is at the [0,0] index.
         # so we need to unshift the object first.
@@ -125,6 +137,8 @@ class FourierTransform2D(object):
             Object to be transformed.
         direction : str
             Direction of the transform. Can be 'forward' or 'backward'.
+                - forward: from image space to frequency space.
+                - backward: from frequency space to image space.
         """
         if direction == 'forward':
             F = self.coefficients(direction='forward')
@@ -151,6 +165,11 @@ class FourierTransform2D(object):
         """ Maximum value of the x coordinate in rad"""
         return self._Xmax
 
+    @property
+    def Qmax(self):
+        """ Maximum value of the u coordinate in rad^-1"""
+        return np.max(self.q)
+    
     @property
     def u(self):
         """ Collocation points in the frequency plane (0-centered)"""
@@ -188,8 +207,7 @@ class FourierTransform2D(object):
             u_convention = cp.flip(self._Un, axis=1).ravel(order="C")
             v_convention = cp.flip(self._Vn, axis=0).ravel(order="C")
             self._Un_convention, self._Vn_convention = u_convention, v_convention
-        # Nota: el código original no hacía return explícito.
-
+        return self._Un_convention, self._Vn_convention
     @property
     def uv_points_unshifted(self):
         """ Unshifted collocation points in the frequency plane"""
@@ -204,3 +222,7 @@ class FourierTransform2D(object):
     def uv_points(self):
         """ Collocation points in the frequency plane"""
         return self._Un, self._Vn
+
+    @property
+    def collocation_points(self):
+        return cp.array([self._Xn, self._Yn]), cp.array([self._Un, self._Vn])

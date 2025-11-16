@@ -74,6 +74,13 @@ class CorrelationMatrix():
         q_copy = cp.where(q_copy == 0, min_freq, q_copy)
         
         return c * (q_copy**m)
+    
+    def sparse(self):
+        """
+        Returns the Wendland covariance matrix as a sparse linear operator.
+        """
+        size = (self._size, self._size2)
+        return  linear_operator(self.sparse_matrix(), size)
 
 class Wendland(CorrelationMatrix):
     def __init__(self, params, u, v, u2 = None, v2 = None):
@@ -107,6 +114,7 @@ class Wendland(CorrelationMatrix):
 
         self._uh2 = self._u2/self._H
         self._vh2 = self._v2/self._H
+
 
     def P_k(self, r, k):
         """
@@ -196,10 +204,3 @@ class Wendland(CorrelationMatrix):
         kernel_csr = cp.sparse.csr_matrix((data_gpu, col_indices_gpu, indptr_gpu), shape=size)
 
         return kernel_csr
-
-    def sparse(self):
-        """
-        Returns the Wendland covariance matrix as a sparse linear operator.
-        """
-        size = (self._size, self._size2)
-        return  linear_operator(self.sparse_matrix(), size)

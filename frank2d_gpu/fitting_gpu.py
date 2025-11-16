@@ -1,5 +1,6 @@
 import cupy as cp
 import cupyx.scipy.sparse as cxs
+import cupyx.scipy.linalg as spla
 import time
 
 from .utilities_gpu import linear_operator
@@ -8,7 +9,9 @@ import numpy as np
 
 
 class IterativeSolverMethod():
-    def __init__(self, u, v, vis, weights, kernel, method = 'bicgstab', rtol = 1e-7,  x0 = None, maxiter = None):
+    def __init__(self, u, v, vis, weights, kernel,
+                 method_name = 'bicgstab', method_func = None,
+                 rtol = 1e-8,  x0 = None, maxiter = None):
         """
          Class to handle the iterative solver methods.
 
@@ -36,11 +39,14 @@ class IterativeSolverMethod():
         self._vis = vis
         self._weights = weights
         self._kernel = kernel
-        
+        self._preconditioner = 'jacobi'
+
+        self._solver_name = method_name
+        self._solver_func = method_func
+
         self._x0 = x0
         self._rtol = rtol
         self._maxiter = maxiter
-        self._method = method
 
         self._A = None
         self._b = None
@@ -48,7 +54,8 @@ class IterativeSolverMethod():
 
         self._sparse_system = None
         self._solution = None
-    
+
+        self._fit_data = {}
     
     def set_A(self, A):
         """
@@ -68,17 +75,26 @@ class IterativeSolverMethod():
         """
         self._A_precond = A_precond
 
-    def get_method(self):
+    def get_solver(self):
         """
         Returns the iterative solver method based on the specified method name.
         """
-        method = self._method
-        if method == 'bicgstab':
+        solver = self._solver_name
+        if solver == 'bicgstab':
             return self.bicgstab
+        else:
+            raise ValueError(f"Solver method '{solver}' not recognized.")
+    
+    def set_solver(self, solver_func):
+        """
+        Sets the iterative solver method.
+        """
+        self._solver = solver_func
 
     def bicgstab(self, A, b, x0=None, *, rtol=1e-7, atol=0., maxiter=None, M=None, psolve = None, callback=None):
         """
         BiConjugate Gradient Stabilized Method (BiCGSTAB) solver (GPU, CuPy).
+        Based on SciPy implementation but adapted for CuPy and with preconditioning via psolve function.
 
         Parameters
         ----------
@@ -96,6 +112,8 @@ class IterativeSolverMethod():
             Maximum number of iterations. Default is N*10.
         M : LinearOperator, optional
             Preconditioner for A, applied as v -> M.matvec(v). If None, identity.
+        psolve : function
+            Preconditioner solve function, called as psolve(v).
         callback : function, optional
             Called as callback(xk) after each iteration.
 
@@ -113,8 +131,8 @@ class IterativeSolverMethod():
 
         bnrm2 = cp.linalg.norm(b)
         tol = max(float(atol), float(rtol) * float(bnrm2))
-        
-        print("Final tolerance : ", tol)
+        print("         + final tolerance : ", atol)
+
         if bnrm2 == 0.0:
             return b, 0
 
@@ -140,10 +158,14 @@ class IterativeSolverMethod():
 
         s = cp.empty_like(r)
 
+        self._tols = []
+
         for iteration in range(maxiter):
             act_tol = float(cp.linalg.norm(r))
+            self._tols.append(act_tol)
             print(".... iteration: ", iteration)
-            print("                        -> actual tol: ", str(act_tol), "vs ", str(tol))
+            print("                             ",
+                  "-> actual tol ", f'{act_tol:.2e}', " versus ", f'{atol:.2e}')
             if act_tol <= tol:
                 return x, 0
 
@@ -207,7 +229,7 @@ class IterativeSolverMethod():
         kernel_csr = self._kernel.sparse_matrix()
         end_time = time.time()
         execution_time = end_time - start_time
-        print(f'--> time kernel = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
+        print(f'        + time kernel = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
 
         N = kernel_csr.shape[0]
 
@@ -218,10 +240,37 @@ class IterativeSolverMethod():
         A.sum_duplicates()
         A.sort_indices()
 
-        # Preconditioner matrix M = diag(A)^{-1}.
-        diagA = A.diagonal()
-        M = 1.0/diagA
-        #M = cxs.csr_matrix((1.0/diagA, cp.arange(N), cp.arange(N+1)), shape=(N, N))
+        preconditioner = self._preconditioner
+        print("        + Using preconditioner method: ", preconditioner)
+        if preconditioner == "jacobi":
+            # Preconditioner matrix M = diag(A)^{-1}.
+            diagA = A.diagonal()
+            M = cxs.csr_matrix((1.0/diagA, cp.arange(N), cp.arange(N+1)), shape=(N, N))
+            M = linear_operator(M, M.shape)
+
+        elif preconditioner == "ilu":
+            start_time = time.time()
+            if not sp.isspmatrix_csc(A):
+                A = A.tocsc()
+            end_time = time.time()
+            execution_time = end_time - start_time
+            print(f'        + time to csc = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
+
+             # ILU requires complex128 dtype.
+            A = A.astype(cp.complex128)
+
+            start_time = time.time()
+            try:
+                ilu = spla.spilu(A, drop_tol=1e-4, fill_factor=10)
+            except RuntimeError as e:
+                print(f"ILU failed: {e}")
+                ilu = spla.spilu(A + 1e-8 * sp.eye(A.shape[0]))
+            end_time = time.time()
+            execution_time = end_time - start_time
+            print(f'        + time ILU = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
+
+             # Preconditioner as a linear operator.
+            M = linear_operator(A.shape, matvec=ilu.solve)
 
         b = cp.asarray(weights * vis)
         
@@ -229,15 +278,12 @@ class IterativeSolverMethod():
         self.set_A_precond(M)
         self.set_b(b)
     
-    def solve_linear_system(self, solver):
+    def solve_linear_system(self):
         """
         Solve the linear system using the specified iterative solver method.
-        Parameters
-        ----------
-        solver : function
-            The iterative solver method to use.
         """
-        psolve=lambda v: v * self._A_precond
+        solver = self._solver
+        psolve = lambda v: self._A_precond.matvec(v)
 
         if self._x0 is None:
             x, info = solver( self._A, self._b, M = self._A_precond,
@@ -251,7 +297,7 @@ class IterativeSolverMethod():
                               psolve = psolve
                             )
 
-        self._res_linear_system = x, info
+        self._solution_linear_system = x, info
 
     def run(self):
         """
@@ -276,41 +322,97 @@ class IterativeSolverMethod():
             The solution vector (V*). Unit = Jy.
         """
         # Create the linear system.
-        print("Creating sparse linear system...")
+        print("===>  Creating sparse linear system...")
         start_time = time.time()
 
         self.build_sparse_linear_system()
 
         end_time = time.time()
         execution_time = end_time - start_time
-        print(f'--> times building system = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
+        print(f'        + time building system = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
 
         # Solve the linear system.
-        print("Solving linear system...")
+        print("===>  Solving linear system...")
         start_time = time.time()
 
-        solver = self.get_method()
-        self.solve_linear_system(solver = solver)
+        print("         + maxiter = ", self._maxiter, " & rtol = ", self._rtol)
+        if self._solver_func is not None:
+            self.set_solver(self._solver_func)
+        else: 
+            method = self.get_solver()
+            self.set_solver(method)
+
+        self.solve_linear_system()
         
         end_time = time.time()
         execution_time = end_time - start_time
         print(f'--> times solving system = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
 
-        x, info = self._res_linear_system
-        # Report on the success of the fitting.
-        fit_correctly = cp.allclose(self._A.matvec(x), self._b)
-        print("               ---> CGM converged?  ", info == 0)
-        print("                    ---> Fit correctly?  ", bool(fit_correctly))
-        if fit_correctly:
-            print("                     !!!!  Sucess..  !!!!")
+        x, info = self._solution_linear_system
 
+        # Report on the success of the fitting.
+        fit_correctly = np.allclose( self._A.matvec(x),
+                                     self._b,
+                                     rtol=1e-3
+                                    )
+
+        print("          + CGM converged?  ", info == 0)
+        print("          + Fit correctly?  ", self.fit_correctly(fit_correctly))
+
+        self._fit_data['tols'] = self._tols
+   
         self._solution = x
 
         return x
 
+    def fit_correctly(self, val):
+        """
+        Returns a string indicating whether the fitting was successful.
+        Parameters
+        ----------
+        val : bool
+            Indicates if the fitting was successful.
+        Returns
+        -------
+        str
+            A string indicating success or failure.
+        """
+        if str(val) == 'True':
+            return " ✔✔✔✔✔✔✔ CGM Sucess.."
+        else:
+            return " ✘✘✘✘✘✘ CGM Failed.."
+    
     @property
-    def sol(self):
+    def solution(self):
         """
         Returns the solution of the linear system.
         """
         return self._solution
+
+    @property
+    def solver(self):
+        """
+        Returns the iterative solver method.
+        """
+        return self.get_solver()
+    
+    @property
+    def A(self):
+        """
+        Returns the matrix A of the linear system.
+        """
+        return self._A
+    
+    @property
+    def b(self):
+        """
+        Returns the right-hand side vector b of the linear system.
+        """
+        return self._b
+    
+    @property
+    def fit_data(self):
+        """
+        Returns the data optimization dictionary.
+        """
+        return self._fit_data

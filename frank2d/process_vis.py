@@ -78,10 +78,12 @@ class Gridding(object):
         bin_edges_v = self.edges_centers(self._bin_centers_v)
 
         if type == 'weighted':
-            u_gridded, v_gridded, vis_gridded, weights_gridded = self.weighted_gridding(u_, v_, Vis_, Weights,
-                                                                                        bin_edges_u, bin_edges_v,
-                                                                                        unshift = unshift,
-                                                                                        hermitian = hermitian)
+            u_gridded, v_gridded, vis_gridded, weights_gridded = self.weighted_gridding(
+                u_, v_, Vis_, Weights,
+                bin_edges_u, bin_edges_v,
+                unshift = unshift,
+                hermitian = hermitian
+            )
 
             return u_gridded, v_gridded, vis_gridded, weights_gridded
 
@@ -106,7 +108,8 @@ class Gridding(object):
         bin_edges = np.concatenate((bin_edges_, [bin_edges_[-1] + 2*correction])) # e.g. [-1.5, -0.5, 0.5, 1.5]
         return bin_edges
     
-    def weighted_gridding(self, u, v, Vis, Weights, edges_u, edges_v, unshift = False, hermitian = True):
+    def weighted_gridding(self, u, v, Vis, Weights, edges_u, edges_v,
+                          unshift = False, hermitian = True):
         """
         Function to grid visibilities in a regular grid using weighted gridding.
         Parameters

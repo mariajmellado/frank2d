@@ -38,6 +38,7 @@ class IterativeSolverMethod():
         self._vis = vis
         self._weights = weights
         self._kernel = kernel
+        self._preconditioner = 'jacobi'
         
         self._solver_name = method_name
         self._solver_func = method_func
@@ -66,7 +67,7 @@ class IterativeSolverMethod():
         elif solver == 'bicgstab':
             return self.bicgstab
         else:
-            return None
+            raise ValueError(f"Solver method '{solver}' not recognized.")
     
     def set_solver(self, solver_func):
         """
@@ -92,35 +93,11 @@ class IterativeSolverMethod():
         """
         self._A_precond = A_precond
 
-    def _get_atol_rtol(self, name, b_norm, atol=0., rtol=1e-5):
-        """
-        Scipy's helper function to handle tolerance normalization.
-        See in https://github.com/scipy/scipy/blob/v1.16.2/scipy/sparse/linalg/_isolve/iterative.py#L158-L304.
-        
-        Parameters
-        ----------
-        name : str
-            Name of the solver method.
-        b_norm : float
-            Norm of the right-hand side vector b.
-        atol : float, optional
-            Absolute tolerance. Default is 0.
-        rtol : float, optional
-            Relative tolerance. Default is 1e-5.
-        """
-        if atol == 'legacy' or atol is None or atol < 0:
-            msg = (f"'scipy.sparse.linalg.{name}' called with invalid `atol`={atol}; "
-                "if set, `atol` must be a real, non-negative number.")
-            raise ValueError(msg)
-
-        atol = max(float(atol), float(rtol) * float(b_norm))
-        return atol, rtol
-
     def cg(self, A, b, x0=None, *, rtol=1e-7, atol=0., maxiter=None, M=None, callback=None):
         A, M, x, b = make_system(A, M, x0, b)
         bnrm2 = np.linalg.norm(b)
 
-        atol, _ = _get_atol_rtol('cg', bnrm2, atol, rtol)
+        atol = max(float(atol), float(rtol) * float(bnrm2))
 
         if bnrm2 == 0:
             return b, 0
@@ -170,7 +147,7 @@ class IterativeSolverMethod():
         A, M, x, b = make_system(A, M, x0, b)
         bnrm2 = np.linalg.norm(b)
 
-        atol, _ = _get_atol_rtol('bicg', bnrm2, atol, rtol)
+        atol = max(float(atol), float(rtol) * float(bnrm2))
 
         if bnrm2 == 0:
             return b, 0
@@ -283,9 +260,9 @@ class IterativeSolverMethod():
         """
         
         A, M, x, b = make_system(A, M, x0, b)
+
         bnrm2 = np.linalg.norm(b)
-    
-        atol, _ = self._get_atol_rtol('bicgstab', bnrm2, atol, rtol)
+        atol = max(float(atol), float(rtol) * float(bnrm2))
         print("         + final tolerance : ", atol)
     
         if bnrm2 == 0:
@@ -318,8 +295,8 @@ class IterativeSolverMethod():
             self._tols.append(act_tol)
             print("                             ",
                   "-> actual tol ", f'{act_tol:.2e}', " versus ", f'{atol:.2e}')
-            if act_tol < atol:  # Are we done?
-
+            if act_tol < atol:
+                print("converged by norm of r")
                 return x, 0
     
             rho = dotprod(rtilde, r)
@@ -398,7 +375,7 @@ class IterativeSolverMethod():
         A.sum_duplicates()
         A.sort_indices()
 
-        preconditioner = "jacobi"
+        preconditioner = self._preconditioner
         print("        + Using preconditioner method: ", preconditioner)
         if preconditioner == "jacobi":
             # Preconditioner matrix M = diag(A)^{-1}.
@@ -421,7 +398,6 @@ class IterativeSolverMethod():
             A = A.astype(np.complex128)
 
             start_time = time.time()
-            print
             try:
                 ilu = spla.spilu(A, drop_tol=1e-4, fill_factor=10)
             except RuntimeError as e:
@@ -432,7 +408,7 @@ class IterativeSolverMethod():
             print(f'        + time ILU = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
 
              # Preconditioner as a linear operator.
-            M = spla.LinearOperator(A.shape, matvec=ilu.solve)
+            M = linear_operator(A.shape, matvec=ilu.solve)
 
         b = weights * vis
 
@@ -528,6 +504,17 @@ class IterativeSolverMethod():
         return x
     
     def fit_correctly(self, val):
+        """
+        Returns a string indicating whether the fitting was successful.
+        Parameters
+        ----------
+        val : bool
+            Indicates if the fitting was successful.
+        Returns
+        -------
+        str
+            A string indicating success or failure.
+        """
         if str(val) == 'True':
             return " ✔✔✔✔✔✔✔ CGM Sucess.."
         else:

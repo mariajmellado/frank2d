@@ -11,7 +11,6 @@ from frank.geometry import SourceGeometry
 from frank.plot import sweep_profile
 
 import numpy as np
-import matplotlib.pyplot as plt
 import time
 
 """
@@ -33,8 +32,8 @@ class Frank2D(object):
         self._N =  N
         self._Nx = N
         self._Ny = N
-        self._N2 = self._N*self._N
-        self._Rmax = Rmax/rad_to_arcsec
+        self._N2 = self._Nx * self._Ny
+        self._Rmax = Rmax / rad_to_arcsec
         self._FT = FourierTransform2D(self._Rmax, self._N)
 
         self._set_x0 = False
@@ -234,8 +233,6 @@ class Frank2D(object):
         V_full : 2D array, unit: Jy
             Full visibility model on a Nx x Ny grid.
         """
-        print("Building full visibility model...")
-
         kernel = self.get_kernel(self._kernel_info["type"])
         kernel_params = self._kernel_info["params"]
 

@@ -15,15 +15,13 @@ import matplotlib.pyplot as plt
 This module is based in classes and functions contained in Frankenstein-1D algorithm for fitting visibilities.
 """
 class MAPEstimator(object):
-    def __init__(self, Rmax, Geometry, N = 50, minimizer = Powell):
+    def __init__(self, Rmax, N = 50, minimizer = Powell):
         """
         Maximum A Posteriori Estimator for the parameters of the Gaussian Process
         Params
         ------
         Rmax : float
             Maximum radius to model, in arcseconds.
-        Geometry : Geometry
-            Geometry object containing the disc geometry.
         N : int, optional
             Number of radial points to use in the model. Default is 50.
             If use N > 50, the optimization can be very slow.
@@ -77,7 +75,7 @@ class MAPEstimator(object):
             if "logl" in initial_guess : 
                 params["logl"] = float(initial_guess["logl"])
         else:
-            # By default, m and logl participate in the optimization.
+            # by default, m and logl participate in the optimization.
             params["m"] = -2.
             params["logl"] = 4.
 
@@ -128,14 +126,17 @@ class MAPEstimator(object):
         print("Fitting the visibilities with Frank2D with 2DFT...")
         # Fit with Frankenstein1D scheme.
         start_time = time.time()
+
         u, v, vis, weights = data['u'], data['v'], data['vis'], data['weights']
         self._FF.fit(u, v, vis, weights)
-        self._GM = self._FF.GaussianModel
-        self._minus_log_posterior = self._GM.minus_log_posterior
-        self._p0 = self._get_p0()
 
         end_time = time.time()
-        print(f"  + Time to set up the matrices: {end_time - start_time:.2f} seconds")
+        print(f" + Time to preprocess the visibilities: {end_time - start_time:.2f} seconds")
+
+        self._GM = self._FF.GaussianModel
+        self._minus_log_posterior = self._GM.minus_log_posterior
+        p0 = self._get_p0()
+        self._p0 = p0
 
         print("Setting the initial guess...")
         initial_guess = self.process_initial_guess(initial_guess)
@@ -156,10 +157,9 @@ class MAPEstimator(object):
         """
         Get the minus log posterior for the initial guess.
         """
-        self._iter = 0
         GM = self._GM
 
-        params = {'m': 0, 'logc': -2, 'logl': 4} # REVIEW
+        params = {'m': 0, 'logc': -2, 'logl': 4}
         p0 = GM.minus_log_posterior(params)
         jDj0, logdetS0, logdetD0 = GM.jDj, GM.logdetS, GM.logdetD
         end_time = time.time()
@@ -174,8 +174,6 @@ class MAPEstimator(object):
         x : array-like
             Parameters to evaluate. If len(x) == 2, x = [p, m] and logl = 4.0.
         """
-        self._iter += 1
-
         GM = self._GM
 
         p0, jDj0, logdetS0, logdetD0 = self._p0
@@ -243,6 +241,7 @@ class FourierBesselFitter(object):
         # Thus, scale height = 0.
 
         self._2DFT = FourierTransform2D(Rmax, N)
+        print("!!!!!!!!!", self._2DFT.Qmax)
         self._Rmax = Rmax*rad_to_arcsec
 
         self._vis_map = VisibilityMapping(self._2DFT,
@@ -290,12 +289,6 @@ class VisibilityMapping:
     VisibilityMapping generates the transform matrices :math:`H(q)` such that
     :math:`V_\nu(q) = H(q) I_\nu`. It also uses these to construct the design
     matrices :math:`M` and :math:`j` used in the fitting. 
-    
-    VisibilityMapping supports following models:
-      1. An optically thick and geometrically thin disc
-      2. An optically thin and geometrically thin disc
-      3. An opticall thin disc with a known Gaussian verictal structure.
-    All models are axisymmetric.
     """
     def __init__(self, DFT, block_data=True,
                  block_size=10 ** 5, check_qbounds=True, verbose=True):
@@ -311,12 +304,6 @@ class VisibilityMapping:
     def map_visibilities(self, u, v, V, weights):
         r"""
         Compute the matrices :math:`M` abd :math:`j` from the visibility data.
-
-        Also compute the null likelihood,
-        .. math:
-            `H0 = 0.5*\log[det(weights/(2*np.pi))]
-             - 0.5*np.sum(V * weights * V):math:`
-        
         """
 
         if self._verbose:
@@ -362,7 +349,7 @@ class VisibilityMapping:
 
                 X = self._get_mapping_coefficients(ks, us, vs)
 
-                wXT = np.matmul(np.transpose(np.conjugate(X)), np.diag(ws), dtype = "complex128")
+                wXT = cp.transpose(cp.conjugate(X)) * ws
                 val = np.matmul(wXT, X, dtype="complex128")
 
                 Ms[i] += val.real
@@ -641,6 +628,9 @@ class GaussianModel:
         return minus_log_posterior
 
     def calculate_S_real_space(self, m, c, l):
+        """
+        Calculate the covariance matrix S in real space.
+        """
         factor = self.factor_power_spectrum(m, c)
         S_fspace = self.Wendland_kernel(factor, l)
         S_real = np.matmul(self.Ykm, np.matmul(S_fspace, self.Ykm_conj), dtype = "complex128").real
@@ -648,6 +638,9 @@ class GaussianModel:
         return S_real
 
     def power_spectrum(self, q, m, c):
+        """
+        Calculate the power spectrum for given frequency q, slope m and amplitude c.
+        """
         if not np.isscalar(q):  
             q[q == 0] = self._min_freq
         elif q == 0:
@@ -655,11 +648,17 @@ class GaussianModel:
         return c*(q**m)
 
     def factor_power_spectrum(self, m, c):
+        """
+        Calculate the geometric mean of the power spectrum at q1 and q2.
+        """
         p1 = self.power_spectrum(self._q1, m, c)
         p2 = self.power_spectrum(self._q2, m, c)
         return np.sqrt(p1 * p2)
     
-    def P_k(self, r, k):    
+    def P_k(self, r, k):
+        """
+        Polynomial functions for the Wendland kernel.
+        """
         if k == 0:
             return np.ones_like(r)  # P_0(r) = 1
         elif k == 1:
@@ -670,7 +669,9 @@ class GaussianModel:
             raise ValueError("k must be 0, 1, or 2.")
 
     def Wendland_kernel(self, amplitude, l):
-        #print("Wendland kernel")
+        """
+        Calculate the Wendland kernel.
+        """
         r = self._r
         H = 2*1.897367*l
         r_normalized = r/H

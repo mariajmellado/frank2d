@@ -47,7 +47,7 @@ Qmax = []
 for i in N_opt:
     start_time = time.time()
     print("Processing for N = {}".format(i))
-    frank2d = Frank2D(N, rout, geom)
+    frank2d = Frank2D(N, rout)
     frank2d.process_vis(uvtable)
     initial_guess = {'m': -2, 'logl': 4}
     frank2d.search_MAP(initial_guess= initial_guess, N = i)
