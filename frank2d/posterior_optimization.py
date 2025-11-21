@@ -349,7 +349,7 @@ class VisibilityMapping:
 
                 X = self._get_mapping_coefficients(ks, us, vs)
 
-                wXT = cp.transpose(cp.conjugate(X)) * ws
+                wXT = np.transpose(np.conjugate(X)) * ws
                 val = np.matmul(wXT, X, dtype="complex128")
 
                 Ms[i] += val.real

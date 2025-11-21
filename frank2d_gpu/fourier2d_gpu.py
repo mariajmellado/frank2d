@@ -168,7 +168,7 @@ class FourierTransform2D(object):
     @property
     def Qmax(self):
         """ Maximum value of the u coordinate in rad^-1"""
-        return np.max(self.q)
+        return cp.max(self.q)
     
     @property
     def u(self):

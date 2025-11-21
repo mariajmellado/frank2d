@@ -99,7 +99,7 @@ class Frank2D(object):
 
         if guess is not None: # If user provides an initial guess.
             print("===>  Setting guess...")
-            index = self.gridded_data_postprocess["index_weighted"]
+            index = self._gridded_data_postprocess["index_weighted"]
             self._x0 = guess[index].flatten()
         else:
             self._x0 = guess
@@ -108,7 +108,8 @@ class Frank2D(object):
 
     def set_fit_method(  self, method_name = 'bicgstab',
                          method_func = None,
-                         maxiter = 50000, rtol = 1e-8):
+                         maxiter = 50000, rtol = 1e-8,
+                         precond_type = 'jacobi'):
         """
         Setter of the fitting method for the iterative solver.
         Parameters:
@@ -144,7 +145,8 @@ class Frank2D(object):
                                              method_func = method_func, 
                                              x0 = self._x0,
                                              maxiter = maxiter,
-                                             rtol = rtol)
+                                             rtol = rtol,
+                                             precond_type = precond_type)
         self._set_fit_method = True
                                             
     def set_gridded_data(self, u, v, Vis, Weights):
@@ -245,7 +247,7 @@ class Frank2D(object):
             data = None,
             kernel_type = 'wend', kernel_params = {'m': -2, 'c': 1e8, 'l': 5e4},
             method_name = 'bicgstab', method_func = None,
-            x0 = None, maxiter = 50000, rtol = 1e-8,
+            x0 = None, maxiter = 50000, rtol = 1e-8, precond_type = 'jacobi',
             hermitian = True, run_from_scratch = False):
         """
         Fit the visibility data using Gaussian Processes.
@@ -310,7 +312,8 @@ class Frank2D(object):
         if not self._set_fit_method:
             self.set_fit_method( method_name = method_name,
                                  method_func = method_func,
-                                 maxiter = maxiter, rtol = rtol)
+                                 maxiter = maxiter, rtol = rtol,
+                                 precond_type = precond_type)
             
         self._solver.run()
         self._sol_visibility_weighted = self._solver.solution

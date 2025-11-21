@@ -145,7 +145,12 @@ class MAPEstimator(object):
             self.set_minimizer(Powell)
         
         print("Optimizing the posterior...")
+        start_time = time.time()
+        print(f"    ** log posterior without logdetD")
         self._minimizer.run()
+
+        end_time = time.time()
+        print(f" + Time to optimize the posterior: {end_time - start_time:.2f} seconds")
 
         x = self._minimizer.solution
 
@@ -186,11 +191,10 @@ class MAPEstimator(object):
         
         return current
 
-    def save_results(self, m, c, l, jDj, logdetD, logdetS, minus_log_posterior):
+    def save_results(self, m, c, l, jDj, logdetS, minus_log_posterior, logdetD):
         self._ms.append(m)
         self._cs.append(c)
         self._ls.append(l)
-        
         self._jDjs.append(jDj)
         self._logdetDs.append(logdetD)
         self._logdetSs.append(logdetS)
@@ -336,8 +340,8 @@ class VisibilityMapping:
             wXT = cp.transpose(cp.conjugate(X)) * ws
             val = cp.matmul(wXT, X, dtype=cp.complex128)
 
-            Ms[i] += val.real
-            js[i] += cp.matmul(wXT, Vs, dtype=cp.complex128).real
+            M += val.real
+            j += cp.matmul(wXT, Vs, dtype=cp.complex128).real
 
             start = end
             end = min(Ndata, end + Nstep)
@@ -347,8 +351,8 @@ class VisibilityMapping:
         H0 = 0.5 * cp.sum(cp.log(w / (2 * cp.pi)) - V * w * V)
 
         return {
-            'M' : Ms[0],
-            'j' : js[0],
+            'M' : M,
+            'j' : j,
             'null_likelihood' : H0,
             'V' : Vi,
             'W' : wi,
@@ -697,4 +701,9 @@ class GaussianModel:
     def logdetS(self):
         """Return the current log determinant of S."""
         return self._logdetS
+        
+    @property
+    def DFT2(self):
+        """Return the FourierTransform2D object."""
+        return self._2DFT
     

@@ -1,5 +1,5 @@
 import numpy as np
-from .utilities import linear_operator
+from .utilities import DotLinearOperator
 from scipy.sparse import csr_matrix
 from scipy.spatial import KDTree
 
@@ -78,8 +78,8 @@ class CorrelationMatrix():
         """
         Returns the Wendland covariance matrix as a sparse linear operator.
         """
-        size = (self._size, self._size2)
-        return  linear_operator(self.sparse_matrix(), size)
+        shape = (self._size, self._size2)
+        return  DotLinearOperator(self.sparse_matrix(), shape)
 
 class SquaredExponential(CorrelationMatrix):
     def __init__(self, params, u, v, u2 = None, v2 = None):

@@ -274,7 +274,7 @@ class PostProcess(object):
         weights_gridded = self._gridded_data['weights']
 
         W = weights_gridded.reshape(self._Nx, self._Ny)
-        mask = (W != 0)
+        mask = (W != 0) 
 
         r = mask.ravel(order="C")
         index_w  = np.flatnonzero(r)
@@ -297,7 +297,7 @@ class PostProcess(object):
     
         self._gridded_data_postprocess = {"weighted": data_w, "unweighted": data_uw,
                                            "index_weighted": index_w, "index_unweighted": index_uw }
-        
+
         return self._gridded_data_postprocess
 
     def build_vis_model(self, kernel, kernel_params, vis_sol_weighted):
@@ -335,6 +335,7 @@ class PostProcess(object):
         if len(index_uw) == 0:
             print("No unweighted data found. Returning weighted visibility model only.")
             V_full = np.zeros((self._Nx, self._Ny), dtype="c16")
+            print("-----------------------------------------", vis_sol_weighted.shape)
             V1 = S11.matvec(vis_sol_weighted)
             data_coords_w = np.unravel_index(index_w, (self._Nx, self._Ny))
             V_full[data_coords_w] = V1
@@ -344,8 +345,14 @@ class PostProcess(object):
             v_uw = data_uw["v"]
             vis_uw = data_uw["vis"]
             weights_uw = data_uw["weights"]
+            
+            start_time = time.time()
+            print("     + Setting kernel..")
             kernel2 = kernel(kernel_params, u_w, v_w, u2 = u_uw, v2 = v_uw) 
             S_12_T = kernel2.sparse()
+            end_time = time.time()
+            execution_time = end_time - start_time
+            print(f'--> time building S_12_T = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
 
             # Build full visibility model.
             V1 = S11.matvec(vis_sol_weighted)

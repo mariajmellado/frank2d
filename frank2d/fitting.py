@@ -4,13 +4,16 @@ import scipy.sparse as cxs
 from scipy.sparse.linalg._isolve.utils import make_system
 import matplotlib.pyplot as plt
 import time
+import pprint
 
-from .utilities import linear_operator
+from .utilities import DotLinearOperator
 
 class IterativeSolverMethod():
     def __init__(self, u, v, vis, weights, kernel,
                  method_name = 'bicgstab', method_func = None,
-                 rtol = 1e-8,  x0 = None, maxiter = None):
+                 rtol = 1e-8,  x0 = None, maxiter = None,
+                 precond_type = 'jacobi', 
+                 verbose = True):
         """
          Class to handle the iterative solver methods.
 
@@ -38,7 +41,7 @@ class IterativeSolverMethod():
         self._vis = vis
         self._weights = weights
         self._kernel = kernel
-        self._preconditioner = 'jacobi'
+        self._preconditioner = precond_type
         
         self._solver_name = method_name
         self._solver_func = method_func
@@ -53,7 +56,12 @@ class IterativeSolverMethod():
         self._sparse_system = None
         self._solution = None
 
+        self._tol_fit_correctly = 1e-5
+
         self._fit_data = {}
+        self._fit_info = {}
+
+        self._verbose = verbose
     
     def get_solver(self):
         """
@@ -263,7 +271,9 @@ class IterativeSolverMethod():
 
         bnrm2 = np.linalg.norm(b)
         atol = max(float(atol), float(rtol) * float(bnrm2))
-        print("         + final tolerance : ", atol)
+        self._fit_info['maxiter'] = maxiter
+        self._fit_info['rtol'] = rtol
+        self._fit_info['final_tol'] = atol
     
         if bnrm2 == 0:
             return b, 0
@@ -289,25 +299,29 @@ class IterativeSolverMethod():
         self._tols = []
     
         for iteration in range(maxiter):
-            print("                       ",
-                  ".... iteration: ", iteration)
             act_tol = np.linalg.norm(r)
             self._tols.append(act_tol)
-            print("                             ",
-                  "-> actual tol ", f'{act_tol:.2e}', " versus ", f'{atol:.2e}')
+            
+            if iteration % 10 == 0:
+                print("     ",
+                    ".... iteration ", iteration, ": " ,
+                    " actual tol ", f'{act_tol:.2e}', " versus ", f'{atol:.2e}')
             if act_tol < atol:
-                print("converged by norm of r")
+                self._fit_info['convergence_by'] = "norm of r"
+                self._fit_info['iterations'] = iteration
                 return x, 0
     
             rho = dotprod(rtilde, r)
             if np.abs(rho) < rhotol:  # rho breakdown
-                print("converged by norm of rho")
+                self._fit_info['convergence_by'] = "norm of rho"
+                self._fit_info['iterations'] = iteration
                 return x, -10
 
             beta = 0
             if iteration > 0:
                 if np.abs(omega) < omegatol:  # omega breakdown
-                    print("converged by norm of omega")
+                    self._fit_info['convergence_by'] = "norm of omega"
+                    self._fit_info['iterations'] = iteration
                     return x, -11
     
                 beta = (rho / rho_prev) * (alpha / omega)
@@ -322,14 +336,16 @@ class IterativeSolverMethod():
             v = matvec(phat)
             rv = dotprod(rtilde, v)
             if rv == 0:
-                print("converged by rv = 0")
+                self._fit_info['convergence_by'] = "norm of rv"
+                self._fit_info['iterations'] = iteration
                 return x, -11
             alpha = rho / rv
             r -= alpha*v
             s[:] = r[:]
     
             if np.linalg.norm(s) < atol:
-                print("converged by norm of s")
+                self._fit_info['convergence_by'] = "norm of s"
+                self._fit_info['iterations'] = iteration
                 x += alpha*phat
                 return x, 0
     
@@ -346,6 +362,8 @@ class IterativeSolverMethod():
 
         else:  # for loop exhausted
             # Return incomplete progress
+            self._fit_info['convergence_by'] = "maxiter"
+            self._fit_info['iterations'] = iteration
             return x, maxiter
 
     def build_sparse_linear_system(self):
@@ -364,7 +382,7 @@ class IterativeSolverMethod():
         kernel_csr = self._kernel.sparse_matrix()
         end_time = time.time()
         execution_time = end_time - start_time
-        print(f'        + time kernel = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
+        print(f'        +  Kernel = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
 
         N = kernel_csr.shape[0]
 
@@ -376,12 +394,12 @@ class IterativeSolverMethod():
         A.sort_indices()
 
         preconditioner = self._preconditioner
-        print("        + Using preconditioner method: ", preconditioner)
+        self._fit_info['preconditioner_method'] = preconditioner
         if preconditioner == "jacobi":
             # Preconditioner matrix M = diag(A)^{-1}.
             diagA = A.diagonal()
             M = cxs.csr_matrix((1.0/diagA, np.arange(N), np.arange(N+1)), shape=(N, N))
-            M = linear_operator(M, M.shape)
+            M = DotLinearOperator(M, M.shape)
 
         elif preconditioner == "ilu":
             import scipy.sparse.linalg as spla
@@ -392,7 +410,7 @@ class IterativeSolverMethod():
                 A = A.tocsc()
             end_time = time.time()
             execution_time = end_time - start_time
-            print(f'        + time to csc = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
+            print(f'        +   CSC = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
 
              # ILU requires complex128 dtype.
             A = A.astype(np.complex128)
@@ -405,15 +423,15 @@ class IterativeSolverMethod():
                 ilu = spla.spilu(A + 1e-8 * sp.eye(A.shape[0]))
             end_time = time.time()
             execution_time = end_time - start_time
-            print(f'        + time ILU = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
+            print(f'        +  ILU = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
 
              # Preconditioner as a linear operator.
-            M = linear_operator(A.shape, matvec=ilu.solve)
+            M = LinearOperator(A.shape, matvec=ilu.solve)
 
         b = weights * vis
 
         # Convert to linear operators.
-        self.set_A(linear_operator(A, A.shape))
+        self.set_A(DotLinearOperator(A, A.shape))
         self.set_A_precond(M)
         self.set_b(b)
     
@@ -431,6 +449,7 @@ class IterativeSolverMethod():
                               rtol = self._rtol, maxiter = self._maxiter
                             )
         else:
+            self._fit_info['using_x0'] = True
             x, info = solver( self._A, self._b, M = self._A_precond,
                               x0 = self._x0,
                               rtol = self._rtol, maxiter = self._maxiter
@@ -468,12 +487,11 @@ class IterativeSolverMethod():
 
         end_time = time.time()
         execution_time = end_time - start_time
-        print(f'        + time building system = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
+        print(f'        +  Building system = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
 
         # Solve the linear system.
         print("===>  Solving linear system...")
         start_time = time.time()
-        print("         + maxiter = ", self._maxiter, " & rtol = ", self._rtol)
         if self._solver_func is not None:
             self.set_solver(self._solver_func)
         else: 
@@ -484,21 +502,24 @@ class IterativeSolverMethod():
 
         end_time = time.time()
         execution_time = end_time - start_time
-        print(f'         + time BiCGStab = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
+        print(f'         +  BiCGStab = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
 
         x, info = self._solution_linear_system
 
         # Report on the success of the fitting.
         fit_correctly = np.allclose( self._A.matvec(x),
                                      self._b,
-                                     rtol=1e-3
+                                     rtol=self._tol_fit_correctly
                                     )
-
-        print("          + CGM converged?  ", info == 0)
-        print("          + Fit correctly?  ", self.fit_correctly(fit_correctly))
+        fit_correctly_bool = self.fit_correctly(fit_correctly)
 
         self._fit_data['tols'] = self._tols
-   
+        self._fit_info['CGM_converged'] = (info == 0)
+        self._fit_info['Fit_correctly'] = fit_correctly
+
+        if self._verbose:
+            pprint.pprint(self._fit_info)
+
         self._solution = x
 
         return x
@@ -516,9 +537,9 @@ class IterativeSolverMethod():
             A string indicating success or failure.
         """
         if str(val) == 'True':
-            return " ✔✔✔✔✔✔✔ CGM Sucess.."
+            return " ✔✔✔✔✔✔✔ Sucess.."
         else:
-            return " ✘✘✘✘✘✘ CGM Failed.."
+            return " ✘✘✘✘✘✘ Failed.."
 
     @property
     def solution(self):
@@ -555,5 +576,11 @@ class IterativeSolverMethod():
         """
         return self._fit_data
     
+    @property
+    def fit_info(self):
+        """
+        Returns the fitting information dictionary.
+        """
+        return self._fit_info
 
     

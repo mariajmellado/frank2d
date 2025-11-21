@@ -3,7 +3,8 @@ import cupyx.scipy.sparse as cxs
 import cupyx.scipy.linalg as spla
 import time
 
-from .utilities_gpu import linear_operator
+from .utilities_gpu import DotLinearOperator
+from cupyx.scipy.sparse.linalg import LinearOperator
 
 import numpy as np
 
@@ -11,7 +12,8 @@ import numpy as np
 class IterativeSolverMethod():
     def __init__(self, u, v, vis, weights, kernel,
                  method_name = 'bicgstab', method_func = None,
-                 rtol = 1e-8,  x0 = None, maxiter = None):
+                 rtol = 1e-8,  x0 = None, maxiter = None,
+                 precond_type = 'jacobi'):
         """
          Class to handle the iterative solver methods.
 
@@ -39,7 +41,7 @@ class IterativeSolverMethod():
         self._vis = vis
         self._weights = weights
         self._kernel = kernel
-        self._preconditioner = 'jacobi'
+        self._preconditioner = precond_type
 
         self._solver_name = method_name
         self._solver_func = method_func
@@ -54,6 +56,8 @@ class IterativeSolverMethod():
 
         self._sparse_system = None
         self._solution = None
+
+        self._tol_fit_correctly = 1e-5
 
         self._fit_data = {}
     
@@ -246,7 +250,7 @@ class IterativeSolverMethod():
             # Preconditioner matrix M = diag(A)^{-1}.
             diagA = A.diagonal()
             M = cxs.csr_matrix((1.0/diagA, cp.arange(N), cp.arange(N+1)), shape=(N, N))
-            M = linear_operator(M, M.shape)
+            M = DotLinearOperator(M, M.shape)
 
         elif preconditioner == "ilu":
             start_time = time.time()
@@ -270,11 +274,11 @@ class IterativeSolverMethod():
             print(f'        + time ILU = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
 
              # Preconditioner as a linear operator.
-            M = linear_operator(A.shape, matvec=ilu.solve)
+            M = LinearOperator(A.shape, matvec=ilu.solve)
 
         b = cp.asarray(weights * vis)
         
-        self.set_A(linear_operator(A, A.shape))
+        self.set_A(DotLinearOperator(A, A.shape))
         self.set_A_precond(M)
         self.set_b(b)
     
@@ -353,14 +357,16 @@ class IterativeSolverMethod():
         # Report on the success of the fitting.
         fit_correctly = np.allclose( self._A.matvec(x),
                                      self._b,
-                                     rtol=1e-3
+                                     rtol=self._tol_fit_correctly
                                     )
 
         print("          + CGM converged?  ", info == 0)
         print("          + Fit correctly?  ", self.fit_correctly(fit_correctly))
 
+        # save results
         self._fit_data['tols'] = self._tols
-   
+        self._fit_data['tol_fit_correctly'] = self._tol_fit_correctly
+
         self._solution = x
 
         return x

@@ -1,7 +1,7 @@
 import cupy as cp
 import numpy as np
 from cupyx.scipy.sparse import csr_matrix
-from .utilities_gpu import linear_operator
+from .utilities_gpu import DotLinearOperator
 from scipy.spatial import KDTree
 
 import time
@@ -188,4 +188,4 @@ class Wendland(CorrelationMatrix):
         Returns the Wendland covariance matrix as a sparse linear operator.
         """
         size = (self._size, self._size2)
-        return  linear_operator(self.sparse_matrix(), size)
+        return  DotLinearOperator(self.sparse_matrix(), size)
