@@ -69,8 +69,9 @@ class Plot(object):
                    kind = 'model',
                    title=r'$V_{model}^{F2D}$',
                    fig_size = 6, zoom = 1,
-                   vmin = -9, vmax = -2,
-                   phase_shift = True, deproject = False):
+                   vmin = -10, vmax = -2,
+                   phase_shift = True, deproject = False, 
+                   ax = None , label_size = 14, title_size = 20):
         
         if zoom <= 0:
             raise ValueError("zoom must be > 0")
@@ -100,30 +101,47 @@ class Plot(object):
             ud, vd, _ = geom.deproject(u, v)
             u, v = ud, vd
 
-        plt.figure(figsize = (fig_size, fig_size))
-        plt.pcolormesh(u,
-                       v,
-                       np.log(np.abs(vis)),
-                       cmap="magma",
-                       vmin=-10, vmax=-2)
-        plt.xlabel(r'u [$\lambda$]')
-        plt.ylabel(r'v [$\lambda$]')
-        plt.title(title)
-        cmap = plt.colorbar(shrink=0.8)
-        cmap.set_label(r'log|V| [Jy]', size=10)
+        if ax is None:
+                fig = plt.figure(figsize = (fig_size, fig_size))
+                ax = fig.add_subplot(111)
+                show_plot = True
+        else:
+            show_plot = False
         
-        plt.xlim(u.max()/zoom, u.min()/zoom)
-        plt.ylim(v.max()/zoom, v.min()/zoom)
+        mesh = ax.pcolormesh(u,
+                            v,
+                            np.log(np.abs(vis)),
+                            cmap="magma",
+                            vmin=vmin, vmax=vmax)
         
-        plt.gca().set_aspect(1)
-        plt.gca().invert_yaxis()
-        plt.show()
+        ax.set_xlabel(r'u [$\lambda$]', size=label_size)
+        ax.set_ylabel(r'v [$\lambda$]', size=label_size)
+        ax.set_title(title, size=title_size)
+        
+        cmap = plt.colorbar(mesh, ax=ax, shrink=0.8)
+        cmap.set_label(r'log$\|V\|$ [Jy]', size=label_size)
+        
+        ax.set_xlim(u.max()/zoom, u.min()/zoom)
+        ax.set_ylim(v.max()/zoom, v.min()/zoom)
+
+        ax.tick_params(axis='both',
+               which='major',
+               labelsize=12,
+               length=5,
+               width=2)
+        
+        ax.set_aspect(1)
+        ax.invert_yaxis()
+        
+        if show_plot:
+            plt.show()
     
     def intensity(self,
                   title= r'$I_{model}^{F2D}$',
                   fig_size = 6, zoom = 1,
                   vmin = 0, vmax = 4e10, gamma = 0.45,
-                  phase_shift = True, deproject = False ):
+                  phase_shift = True, deproject = False,
+                  ax = None , label_size = 14, title_size = 20):
         
         if zoom <= 0:
             raise ValueError("zoom must be > 0")
@@ -148,24 +166,43 @@ class Plot(object):
         if deproject:
             xd, yd = geom.deproject_xy(x, y)
             x, y = xd, yd
-            
-        plt.figure(figsize = (fig_size, fig_size))
+
+        if ax is None:
+            fig = plt.figure(figsize = (fig_size, fig_size))
+            ax = fig.add_subplot(111) # Crea el eje
+            show_plot = True
+        else:
+            show_plot = False
+        
         norm = colors.PowerNorm(gamma = gamma, vmin = vmin, vmax = vmax)
-        plt.pcolormesh(x,
-                       y,
-                       I,
-                       cmap="magma",
-                       norm=norm)
-        plt.xlabel(r'RA ["]')
-        plt.ylabel(r'Dec ["]')
-        cmap = plt.colorbar(shrink=0.8)
-        plt.title(title)
-        cmap.set_label(r'I [Jy/sr]', size=10)
-        plt.xlim(x.max()/zoom, x.min()/zoom)
-        plt.ylim(y.max()/zoom, y.min()/zoom) 
-        plt.gca().set_aspect(1)
-        plt.gca().invert_yaxis()
-        plt.show()
+
+        mesh = ax.pcolormesh(x,
+                                y,
+                                I,
+                                cmap="magma",
+                                norm=norm)
+            
+        ax.set_xlabel(r'RA ["]', size=label_size)
+        ax.set_ylabel(r'Dec ["]', size=label_size)
+        ax.set_title(title, size=title_size)
+        
+        cmap = plt.colorbar(mesh, ax=ax, shrink=0.8)
+        cmap.set_label(r'I [Jy/sr]', size=label_size)
+        
+        ax.set_xlim(x.max()/zoom, x.min()/zoom)
+        ax.set_ylim(y.max()/zoom, y.min()/zoom)
+
+        ax.tick_params(axis='both',
+               which='major',
+               labelsize=12,
+               length=5,
+               width=2)
+        
+        ax.set_aspect(1)
+        ax.invert_yaxis()
+        
+        if show_plot:
+            plt.show()
 
     def get_profile(self, x1, x2, f, bins, weighted = False, weights = None, fit_1d = False):
         from scipy.stats import binned_statistic
@@ -308,7 +345,7 @@ class Plot(object):
         plt.yscale('log')
         plt.ylim(1e-5, 0)
         plt.xlim(1e5, 6e6)
-        plt.ylabel('|V| [Jy]', size = 10)
+        plt.ylabel(r'$\|V\|$ [Jy]', size = 10)
         plt.title(title+', N = ' + str(self._Nx))
         plt.legend(fontsize= 10, loc = 'best')
         plt.show()

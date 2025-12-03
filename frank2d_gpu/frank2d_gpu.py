@@ -331,7 +331,7 @@ class Frank2D(object):
             if not self._set_gridded_data:
                 raise ValueError("Gridded data is not set, u, v, Vis and Weights must be provided.")
             data = self._gridded_data
-
+        
         if not self._set_MAP_estimator:
             self._MAP_estimator = MAPEstimator(self._Rmax, N=N)
             self._set_MAP_estimator = True

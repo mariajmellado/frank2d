@@ -45,7 +45,7 @@ class MAPEstimator(object):
 
         self._best = {}
     
-    def set_minimizer(self, minimizer, initial_guess = {"m": -2, "logl": 4}):
+    def set_minimizer(self, minimizer, initial_guess = {"m": -2, "logl": 4, "p": -2}):
         """
         Set the minimizer to use for the posterior optimization.
         """
@@ -63,55 +63,62 @@ class MAPEstimator(object):
         initial_guess : dict, optional
             Initial guess for the parameters m and logl. If None, use m = -2 and logl = 4.
         """
-        p = -2.
-        params = { "p" : p }
+        params = {}
+        if 'p' not in initial_guess:
+            raise ValueError("Initial guess must contain 'p' parameter.")
+        if 'm' not in initial_guess:
+            raise ValueError("Initial guess must contain 'm' parameter.")
+        if 'logl' not in initial_guess:
+            raise ValueError("Initial guess must contain 'logl' parameter.")
 
-        if initial_guess is not None:
-            if "m" in initial_guess : 
-                params["m"] = float(initial_guess["m"])
-            else:
-                # dict must contain m.
-                params["m"] = -2.
-            if "logl" in initial_guess : 
-                params["logl"] = float(initial_guess["logl"])
-        else:
-            # by default, m and logl participate in the optimization.
-            params["m"] = -2.
-            params["logl"] = 4.
+        params['p'] = float(initial_guess['p'])  # Fixed relation: logc = p - 5*m
+        params['m'] = float(initial_guess['m'])
+        params['l'] = float(10**initial_guess['logl'])
 
-        self._initial_guess = params
-
-        return list(params.values())
+        # the order is important.
+        self._params_order = ['p', 'm', 'l']
+        list_params = [params[key] for key in self._params_order]
+        return list_params
     
-    def process_x_minimizer(self, x, final_result = False):
+    def create_gaussian_model(self, data):
         """
-        This process depends on the initial guess.
-        Minimizer always optimizes p and m, and logl if present in the initial guess.
+        Create the GaussianModel object using the Frank2D fitting scheme.
+        Params
+        ------
+        data : dict
+            Dictionary containing the data to fit. Must contain the keys 'u', 'v', 'vis', and 'weights'.
+        """
+        print("Fitting the visibilities with Frank2D with 2DFT...")
+        start_time = time.time()
+
+        u, v, vis, weights = data['u'], data['v'], data['vis'], data['weights']
+        self._FF.fit(u, v, vis, weights)
+
+        end_time = time.time()
+        print(f" + Time to preprocess the visibilities: {end_time - start_time:.2f} seconds")
+
+        self._GM = self._FF.GaussianModel
+        self._minus_log_posterior = self._GM.minus_log_posterior
+
+    def process_x_minimizer(self, x):
+        """
+        Process the parameters from the minimizer to the parameters used in the GaussianModel.
         Params
         ------
         x : array-like
-            Parameters to process. If len(x) == 2, x = [p, m] and logl = 4.0.
-        final_result : bool, optional
-            If True, return the parameters readable for the user, i.e., m, c, l.
+            Parameters to process. By default, x contains p, m, l.
         """
-        guess = self._initial_guess
-        result = {k: v for k, v in zip(guess.keys(), x)}
+        # Follow the order defined in self._params_order and asign the values of x.
+        params = { key: x[i] for i, key in enumerate(self._params_order) }
+        m = params['m']
+        l = params['l']
+        p  = params['p']
+        logc = p - 5*m
+        c = 10**logc
 
-        p = result["p"] # p is always present.
-        m = result["m"] # m is always present.
-        logc = result["p"] - 5*m
+        return {'m': m, 'c': c, 'l': l}
 
-        if "logl" in result:
-            logl = result["logl"]
-        else:
-            logl = 4
-
-        if final_result:
-            return {'m': m, 'c': 10**logc, 'l': 10**logl}
-        else:
-            return {'m': m, 'logc': logc,  'logl': logl}
-
-    def optimize(self, data, initial_guess = {"m": -2, "logl": 4}):
+    def optimize(self, data, initial_guess = {"p": -2, "m": -2, "logl": 4}):
         """
         Optimize the posterior to find the MAP estimate of the parameters.
         Params
@@ -123,18 +130,9 @@ class MAPEstimator(object):
             The parameter c is always initialized to 10**(-2).
 
         """
-        print("Fitting the visibilities with Frank2D with 2DFT...")
         # Fit with Frankenstein1D scheme.
-        start_time = time.time()
+        self.create_gaussian_model(data)
 
-        u, v, vis, weights = data['u'], data['v'], data['vis'], data['weights']
-        self._FF.fit(u, v, vis, weights)
-
-        end_time = time.time()
-        print(f" + Time to preprocess the visibilities: {end_time - start_time:.2f} seconds")
-
-        self._GM = self._FF.GaussianModel
-        self._minus_log_posterior = self._GM.minus_log_posterior
         p0 = self._get_p0()
         self._p0 = p0
 
@@ -146,12 +144,17 @@ class MAPEstimator(object):
             self.set_minimizer(Powell)
         
         print("Optimizing the posterior...")
+        start_time = time.time()
+
         self._minimizer.run()
+
+        end_time = time.time()
+        print(f" + Time to optimize the posterior: {end_time - start_time:.2f} seconds")
 
         x = self._minimizer.solution
 
         # Normalize the parameters.
-        self._best = self.process_x_minimizer(x, final_result = True)
+        self._best = self.process_x_minimizer(x)
       
     def _get_p0(self):
         """
@@ -159,10 +162,9 @@ class MAPEstimator(object):
         """
         GM = self._GM
 
-        params = {'m': 0, 'logc': -2, 'logl': 4}
+        params = {'m': 0, 'c': 10**(-2), 'l':10**4}
         p0 = GM.minus_log_posterior(params)
         jDj0, logdetS0, logdetD0 = GM.jDj, GM.logdetS, GM.logdetD
-        end_time = time.time()
 
         return p0, jDj0, logdetS0, logdetD0
     
@@ -172,35 +174,42 @@ class MAPEstimator(object):
         Params
         ------
         x : array-like
-            Parameters to evaluate. If len(x) == 2, x = [p, m] and logl = 4.0.
+            Parameters to evaluate. Follows the order defined in self._params_order.
         """
         GM = self._GM
 
         p0, jDj0, logdetS0, logdetD0 = self._p0
 
-        x_ = self.process_x_minimizer(x)
-        params = {'m': x_['m'], 'logc': x_['logc'], 'logl': x_['logl']}
+        params = self.process_x_minimizer(x)
 
         current = GM.minus_log_posterior(params) - p0
-
         jDj, S, D = GM.jDj - jDj0, GM.logdetS - logdetS0, GM.logdetD - logdetD0
-        self.save_results(params['m'], 10**params['logc'], 10**params['logl'], jDj, D, S, current)
+
+        result = {
+            'm': params['m'],
+            'c': params['c'],
+            'l': params['l'],
+            'minus_log_posterior': current,
+            'jDj': jDj,
+            'logdetS': S,
+            'logdetD': D,
+        }
+        self.save_results(result)
 
         return current
 
-    def save_results(self, m, c, l, jDj, logdetD, logdetS, minus_log_posterior):
+    def save_results(self, results):
         """
         Save the results of the posterior optimization.
         """
-        self._ms.append(m)
-        self._cs.append(c)
-        self._ls.append(l)
-        
-        self._jDjs.append(jDj)
-        self._logdetDs.append(logdetD)
-        self._logdetSs.append(logdetS)
-        self._minus_log_posteriors.append(minus_log_posterior)
-    
+        self._ms.append(results['m'])
+        self._cs.append(results['c'])
+        self._ls.append(results['l'])
+        self._jDjs.append(results['jDj'])
+        self._logdetDs.append(results['logdetD'])
+        self._logdetSs.append(results['logdetS'])
+        self._minus_log_posteriors.append(results['minus_log_posterior'])
+
     @property
     def MAP(self):
         """Return the best parameters found in the posterior optimization."""
@@ -218,7 +227,9 @@ class MAPEstimator(object):
 
     @property
     def results_opt(self):
-        """Return the results of the posterior optimization."""
+        """
+        Save the results of the posterior optimization.
+        """
         return {
             'm': self._ms,
             'c': self._cs,
@@ -236,12 +247,10 @@ class FourierBesselFitter(object):
 
     def __init__(self, Rmax, N, block_data=True,
                  block_size=10 ** 5, verbose=True):
-        
         # Assuming optically thick disc by default.
         # Thus, scale height = 0.
 
         self._2DFT = FourierTransform2D(Rmax, N)
-        print("!!!!!!!!!", self._2DFT.Qmax)
         self._Rmax = Rmax*rad_to_arcsec
 
         self._vis_map = VisibilityMapping(self._2DFT,
@@ -249,13 +258,6 @@ class FourierBesselFitter(object):
                                           block_size=block_size,
                                           check_qbounds=False,
                                           verbose=verbose)
-
-        self._verbose = verbose
-
-        self._info  = {
-                        'Rmax' : self._2DFT.Rmax * rad_to_arcsec,
-                        'N' : self._2DFT.size
-                       }
 
     def preprocess_visibilities(self, u, v, V, weights):
         r"""Prepare the visibilities for fitting. 
@@ -294,16 +296,17 @@ class VisibilityMapping:
                  block_size=10 ** 5, check_qbounds=True, verbose=True):
         # Store flags
         self.check_qbounds = check_qbounds
-        self._verbose = verbose 
-
         self._chunking = block_data
         self._chunk_size = block_size
+
+        self._verbose = verbose
 
         self._2DFT = DFT
    
     def map_visibilities(self, u, v, V, weights):
         r"""
-        Compute the matrices :math:`M` abd :math:`j` from the visibility data.
+        Compute the matrices :math:`M` and :math:`j` from the visibility data.
+        Optimized for single channel/element usage.
         """
 
         if self._verbose:
@@ -314,70 +317,58 @@ class VisibilityMapping:
         # Check consistency of the uv points with the model
         self._check_uv_range(q)
 
+        # Ensure weights are real
         w = (np.ones_like(V) * weights).real
 
-        frequencies = np.ones_like(V)
-        channels = np.unique(frequencies)
-        Ms = np.zeros([len(channels), self.size, self.size], dtype='f8')
-        js = np.zeros([len(channels), self.size], dtype='f8')
-
-        for i, f in enumerate(channels):
-            idx = frequencies == f
-
-            qi = q[idx]
-            ki = np.ones(len(q[idx]))#k[idx]
-            wi = w[idx]
-            Vi = V[idx]
+        # Initialization: Direct 2D/1D allocation (No 'channel' dimension)
+        M = np.zeros((self.size, self.size), dtype='f8')
+        j = np.zeros(self.size, dtype='f8')
         
-            # If chunking is used, we will build up M and j chunk-by-chunk
-            if self._chunking:
-                Nstep = int(self._chunk_size / self.size + 1)
-            else:
-                Nstep = len(Vi)
+        Ndata = len(V)
 
-            start = 0
-            end = Nstep
-            Ndata = len(Vi)
+        # If chunking is used, we will build up M and j chunk-by-chunk
+        if self._chunking:
+            Nstep = int(self._chunk_size / self.size + 1)
+        else:
+            Nstep = Ndata
 
-            while start < Ndata:
-                qs = qi[start:end]
-                us = u[start:end]
-                vs = v[start:end]
-                ks = ki[start:end]
-                ws = wi[start:end]
-                Vs = Vi[start:end]
+        start = 0
+        end = min(Nstep, Ndata)
 
-                X = self._get_mapping_coefficients(ks, us, vs)
+        while start < Ndata:
+            # Slicing directly from main arrays (no need for intermediate filtered arrays)
+            us_chunk = u[start:end]
+            vs_chunk = v[start:end]
+            ws_chunk = w[start:end]
+            Vs_chunk = V[start:end]
+            
+            # Generate k only for the chunk (saves memory vs generating ones for full size)
+            ks_chunk = np.ones(len(us_chunk))
 
-                wXT = np.transpose(np.conjugate(X)) * ws
-                val = np.matmul(wXT, X, dtype="complex128")
+            X = self._get_mapping_coefficients(ks_chunk, us_chunk, vs_chunk)
 
-                Ms[i] += val.real
-                js[i] += np.matmul(wXT, Vs, dtype="complex128").real
+            wXT = np.transpose(np.conjugate(X)) * ws_chunk
+            
+            # Calculate and accumulate directly into M and j
+            # No need for intermediate 'val' variable if memory is tight, 
+            # but keeping it explicit for readability.
+            val = np.matmul(wXT, X, dtype="complex128")
 
-                start = end
-                end = min(Ndata, end + Nstep)
+            M += val.real
+            j += np.matmul(wXT, Vs_chunk, dtype="complex128").real
 
-        N = int(np.sqrt(self._2DFT.size))
-
-        # Compute likelihood normalization H_0, i.e., the
-        # log-likelihood of a source with I=0.
-        H0 = 0.5 * np.sum(np.log(w / (2 * np.pi)) - V * w * V)
-
+            start = end
+            end = min(Ndata, end + Nstep)
 
         return {
-            'M' : Ms[0],
-            'j' : js[0],
-            'V' : Vi,
-            'W' : wi,
-            'null_likelihood' : H0,
+            'M': M,
+            'j': j,
+            'V': V,
+            'W': w,
         }
 
     def predict_visibilities(self, I, u, v, k=None):
-        r"""Compute the predicted visibilities given the brightness profile, I
-
-        """
-        # Chunk the visibility calulation for speed
+        r"""Compute the predicted visibilities given the brightness profile, I"""
         if self._chunking:
             Ni = int(self._chunk_size / self.size + 1)
         else:
@@ -571,7 +562,39 @@ class GaussianModel:
         """Compute the mean and variance"""
         self._mu = self.calculate_mu_cholesky(self._Dinv)
 
-    def minus_log_posterior(self, param = None):
+    def logdet(self, M):
+        """
+        Calculate the log determinant of matrix m using LDL decomposition.
+        """
+        l, d, p = scipy.linalg.ldl(M)
+        d = np.diag(d)
+        return np.sum(np.log(np.abs(d)))
+
+    def preprocess_params(self, params):
+        """
+        Preprocess the parameters m, logc, logl.
+        Params
+        ------
+        param : dict
+            Dictionary containing the parameters m, log_c (or c), log_l (or l).
+        """
+        if params is None:
+            raise ValueError("Params cannot be None.")
+        m = params['m']
+        if 'logc' in params:
+            c = 10**params['logc']
+        elif 'c' in params:
+            c = params['c']
+        if 'logl' in params:
+            l = 10**params['logl']
+        elif 'l' in params:
+            l = params['l']
+
+        params_normalized = {'m': m, 'c': c, 'l': l}
+        
+        return params_normalized
+
+    def minus_log_posterior(self, params = None):
         """
         Calculate the negative log posterior for given parameters m, c, logl.
         The log posterior is given by
@@ -584,26 +607,13 @@ class GaussianModel:
             If None, use the current values of the class.
         """
 
-        if param is not None:
-            m = param['m']
-            if 'logc' in param:
-                c = 10**param['logc']
-            elif 'c' in param:
-                c = param['c']
-            if 'logl' in param:
-                l = 10**param['logl']
-            elif 'l' in param:
-                l = param['l']
-        else:
-            m = self.m
-            c = 10**self.log_c
-            l = 10**self.log_l
+        params = self.preprocess_params(params)
+        m, c, l = params['m'], params['c'], params['l']
 
         # Calculate S in real space.
         S_real  = self.calculate_S_real_space(m, c, l)
 
         # Calculate the inverse of S with Cholesky decomposition.
-
         self._Sinv = self.calculate_S_inv_cholesky(S_real)
 
         # Calculate Dinv.
@@ -613,8 +623,8 @@ class GaussianModel:
         self._solve_mu()
 
         # Calculate the log determinants.
-        self._logdetS = np.linalg.slogdet(S_real)[1]
-        self._logdetD = -np.linalg.slogdet(self._Dinv)[1]
+        self._logdetS = self.logdet(S_real)
+        self._logdetD = -self.logdet(self._Dinv)
 
         # Calculate j^T D j = j^T mu
         self._jDj = np.dot(np.transpose(self._j), self._mu)
@@ -727,7 +737,7 @@ class GaussianModel:
     def logdetS(self):
         """Return the current log determinant of S."""
         return self._logdetS
-    
+
     @property
     def DFT2(self):
         """Return the FourierTransform2D object."""

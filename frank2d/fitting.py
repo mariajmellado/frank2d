@@ -5,6 +5,7 @@ from scipy.sparse.linalg._isolve.utils import make_system
 import matplotlib.pyplot as plt
 import time
 import pprint
+from tqdm import tqdm
 
 from .utilities import DotLinearOperator
 
@@ -12,8 +13,7 @@ class IterativeSolverMethod():
     def __init__(self, u, v, vis, weights, kernel,
                  method_name = 'bicgstab', method_func = None,
                  rtol = 1e-8,  x0 = None, maxiter = None,
-                 precond_type = 'jacobi', 
-                 verbose = True):
+                 precond_type = 'jacobi'):
         """
          Class to handle the iterative solver methods.
 
@@ -42,7 +42,7 @@ class IterativeSolverMethod():
         self._weights = weights
         self._kernel = kernel
         self._preconditioner = precond_type
-        
+
         self._solver_name = method_name
         self._solver_func = method_func
         self._x0 = x0
@@ -61,8 +61,8 @@ class IterativeSolverMethod():
         self._fit_data = {}
         self._fit_info = {}
 
-        self._verbose = verbose
-    
+        self._verbose = True
+
     def get_solver(self):
         """
         Returns the iterative solver method based on the specified method name.
@@ -298,14 +298,13 @@ class IterativeSolverMethod():
 
         self._tols = []
     
-        for iteration in range(maxiter):
+        for iteration in tqdm(range(maxiter), desc="         + Fitting with BiCGStab...", unit=" iterations"):
+            time.sleep(0.05)
             act_tol = np.linalg.norm(r)
             self._tols.append(act_tol)
-            
-            if iteration % 10 == 0:
-                print("     ",
-                    ".... iteration ", iteration, ": " ,
-                    " actual tol ", f'{act_tol:.2e}', " versus ", f'{atol:.2e}')
+            #if iteration % 100 == 0:
+            #    print("                 ",
+            #        " actual tol ", f'{act_tol:.2e}', " versus ", f'{atol:.2e}')
             if act_tol < atol:
                 self._fit_info['convergence_by'] = "norm of r"
                 self._fit_info['iterations'] = iteration
@@ -375,6 +374,7 @@ class IterativeSolverMethod():
         A is I + N^{-1} S_{data}.
         b is (N^{-1} V_{data}).
         """
+
         weights = self._weights
         vis = self._vis
 
@@ -427,10 +427,11 @@ class IterativeSolverMethod():
 
              # Preconditioner as a linear operator.
             M = LinearOperator(A.shape, matvec=ilu.solve)
+        else:
+            raise ValueError(f"Preconditioner '{preconditioner}' not recognized.")
 
         b = weights * vis
 
-        # Convert to linear operators.
         self.set_A(DotLinearOperator(A, A.shape))
         self.set_A_precond(M)
         self.set_b(b)
@@ -502,7 +503,7 @@ class IterativeSolverMethod():
 
         end_time = time.time()
         execution_time = end_time - start_time
-        print(f'         +  BiCGStab = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
+        print(f'            +  BiCGStab = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
 
         x, info = self._solution_linear_system
 
@@ -523,7 +524,7 @@ class IterativeSolverMethod():
         self._solution = x
 
         return x
-    
+
     def fit_correctly(self, val):
         """
         Returns a string indicating whether the fitting was successful.
@@ -575,12 +576,10 @@ class IterativeSolverMethod():
         Returns the data optimization dictionary.
         """
         return self._fit_data
-    
+
     @property
     def fit_info(self):
         """
         Returns the fitting information dictionary.
         """
         return self._fit_info
-
-    

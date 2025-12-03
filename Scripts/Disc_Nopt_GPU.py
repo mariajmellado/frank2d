@@ -20,24 +20,27 @@ from frank2d_gpu.plot_gpu import Plot
 from frank2d_gpu.constants import rad_to_arcsec, deg_to_rad
 from frank2d_gpu.posterior_optimization_gpu import MAPEstimator
 
-disc = 'Simulated'
+disc = 'SimulatedBlob'
 print("-----> Disc type: {}".format(disc))
 
-dir = "./../../data/"
-if disc == 'Simulated':
-    data_file = dir + "uvtable_nonsym_disc_blob_noisy.npz"
+dir = "./../../data/uvtable/"
+if disc == 'SimulatedBlob':
+    data_file = dir + "SimulatedBlob.txt"
     inc = 0
     pa = 0
     dra = 0
     ddec = 0
-    rout = 1*2
+    rout = 1
+    Rmax = 3*rout
 
-    file = cp.load(data_file)
-    u, v, Vis, Weights = file['u'], file['v'], file['vis'], file['weights']
-    # [50, 60, 70, 80]
-    # Times taken:  [23.821291848023733, 83.7020370999972, 96.87331301768621, 208.44252157211304]
-    # MAPs:  [{'m': -2.6928767634567086, 'c': 5565918924985.133, 'l': 85344.21491570085}, {'m': -3.1733216083914595, 'c': 4781178693980001.0, 'l': 83515.64050517132}, {'m': -3.5833382724264506, 'c': 1.4774087424414195e+18, 'l': 81076.42094700658}, {'m': -4.572459366888535, 'c': 1.0086866109221515e+24, 'l': 68720.91547274287}]
-    # Qmax:  [array(1823140.54021814), array(2187768.64826177), array(2552396.7563054), array(2917024.86434902)]
+    file = cp.loadtxt(data_file, unpack=True)
+    u, v, Re, Im, Weights = file
+    Vis = Re + Im*1j
+
+    #[50, 60, 70, 80, 90]
+    #Times taken:  [7.870652735233307, 37.83131151596705, 56.695450735092166, 66.12822169860205, 140.7839174469312]
+    #MAPs:  [{'m': -1.7118115146053943, 'c': 1107386.7020548182, 'l': 21833.50491835495}, {'m': -1.7900507315194405, 'c': 4208615.485734088, 'l': 22746.607839035685}, {'m': -2.205758019904303, 'c': 1360404752.1630862, 'l': 22817.1219726599}, {'m': -2.9537030067142087, 'c': 40546491180778.625, 'l': 22781.422417760932}, {'m': -3.7041542492704664, 'c': 1.3882769163865464e+18, 'l': 22906.177349190206}]
+    #Qmax:  [array(1215427.02681209), array(1458512.43217451), array(1701597.83753693), array(1944683.24289935), array(2187768.64826177)]
 if disc == 'AS209':
     AS209 = {'inc': 34.97, 'pa': 85.76, 'dra':1.9e-3, 'ddec':-2.5e-3, 'rout': 1.2*2, 'disk_name': 'AS209'}
     data_file = dir +"uvtable_" + disc + "_continuum.npz"
@@ -80,45 +83,53 @@ if disc =='Elias27':
 uvtable = {'u': u, 'v': v, 'vis': Vis, 'weights': Weights }
 
 geom = Geometry(inc, pa, dra, ddec)
-N = 300
+Qmax = max(cp.hypot(u,v))
 
-N_opt = [50, 60, 70, 80]
+import math 
+N = math.floor(5* Rmax/rad_to_arcsec * Qmax)
+
+N_opt = [60, 70, 80]
 maps = []
 frank2d_objects = []
 times = []
-Qmax = []
+Qmaxs = []
+print("x-------------------------------------------------x")
+print("For N_opt array: ", N_opt)
+print("Running with Rmax = {} arcsec".format(Rmax))
 
 for i in N_opt:
     start_time = time.time()
     print("---> Processing for N = {}".format(i))
-    frank2d = Frank2D(N, rout)
+    frank2d = Frank2D(N, Rmax)
     frank2d.process_vis(uvtable)
-    initial_guess = {'m': -2, 'logl': 4}
+    initial_guess = {'m': -1, 'logl': 4, 'p': -1}
     frank2d.search_MAP(initial_guess= initial_guess, N = i)
 
     end_time = time.time()
     total_time = (end_time - start_time)/60
-    print("     ---> N = {}, Time taken: {:.2f} seconds".format(i, total_time))
+
     frank2d_objects.append(frank2d)
     times.append(total_time)
 
     best = frank2d.MAP
     maps.append(best)
-    print("     ---> MAP: "+ str(best))
+    print("     + MAP: "+ str(best))
 
     MAPEs = frank2d.MAPEstimator
 
-    print("     ---> Saving  frank2d object...")
+    print("     + Saving  frank2d object...")
     import pickle
-    with open(dir+ disc+'_opt_Nopt_{}.pkl'.format(i), 'wb') as f:
+    dir_ = "../../data/exp/N_opt/"
+    with open(dir_+ disc+ '_optGPU_Nopt{}.pkl'.format(i), 'wb') as f:
         pickle.dump(frank2d, f)
 
     GP =  MAPEs.GaussianModel
     DFT = GP.DFT2
     qmax = cp.max(DFT.Qmax)
-    Qmax.append(qmax)
+    Qmaxs.append(qmax)
 
-    print("     ---> Qmax: " + str(qmax))
+    print("     + Qmax: " + str(qmax))
+    print("         + Time taken: {:.2f} mins".format(i, total_time))
     print("x-------------------------------------------------x")
 
 print(N_opt)
