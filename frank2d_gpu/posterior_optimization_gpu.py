@@ -79,7 +79,6 @@ class MAPEstimator(object):
         # the order is important.
         self._params_order = ['p', 'm', 'l']
         list_params = [params[key] for key in self._params_order]
-        print(" + Initial guess for the parameters (p, m, l):", list_params)
         return list_params
     
     def create_gaussian_model(self, data):

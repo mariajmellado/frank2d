@@ -71,7 +71,8 @@ class Plot(object):
                    fig_size = 6, zoom = 1,
                    vmin = -10, vmax = -2,
                    phase_shift = True, deproject = False, 
-                   ax = None , label_size = 14, title_size = 20):
+                   ax = None , label_size = 14, title_size = 20,
+                   tick_label_size = 13):
         
         if zoom <= 0:
             raise ValueError("zoom must be > 0")
@@ -120,13 +121,15 @@ class Plot(object):
         
         cmap = plt.colorbar(mesh, ax=ax, shrink=0.8)
         cmap.set_label(r'log$\|V\|$ [Jy]', size=label_size)
+        cmap.ax.tick_params(labelsize=tick_label_size)
+
         
         ax.set_xlim(u.max()/zoom, u.min()/zoom)
         ax.set_ylim(v.max()/zoom, v.min()/zoom)
 
         ax.tick_params(axis='both',
                which='major',
-               labelsize=12,
+               labelsize=tick_label_size,
                length=5,
                width=2)
         
@@ -141,7 +144,8 @@ class Plot(object):
                   fig_size = 6, zoom = 1,
                   vmin = 0, vmax = 4e10, gamma = 0.45,
                   phase_shift = True, deproject = False,
-                  ax = None , label_size = 14, title_size = 20):
+                  ax = None , label_size = 14, title_size = 20,
+                  tick_label_size = 13):
         
         if zoom <= 0:
             raise ValueError("zoom must be > 0")
@@ -188,13 +192,14 @@ class Plot(object):
         
         cmap = plt.colorbar(mesh, ax=ax, shrink=0.8)
         cmap.set_label(r'I [Jy/sr]', size=label_size)
+        cmap.ax.tick_params(labelsize=tick_label_size)
         
         ax.set_xlim(x.max()/zoom, x.min()/zoom)
         ax.set_ylim(y.max()/zoom, y.min()/zoom)
 
         ax.tick_params(axis='both',
                which='major',
-               labelsize=12,
+               labelsize=tick_label_size,
                length=5,
                width=2)
         

@@ -25,7 +25,7 @@ print("-----> Disc type: {}".format(disc))
 
 dir = "./../../data/uvtable/"
 if disc == 'SimulatedBlob':
-    data_file = dir + "SimulatedBlob.txt"
+    data_file = dir + "uvtable_SimulatedBlob.txt"
     inc = 0
     pa = 0
     dra = 0
@@ -88,7 +88,7 @@ Qmax = max(cp.hypot(u,v))
 import math 
 N = math.floor(5* Rmax/rad_to_arcsec * Qmax)
 
-N_opt = [60, 70, 80]
+N_opt = [50, 60, 70, 80]
 maps = []
 frank2d_objects = []
 times = []

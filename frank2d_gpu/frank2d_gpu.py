@@ -324,7 +324,7 @@ class Frank2D(object):
         self._sol_intensity = self.transform(self._sol_visibility)
 
     def search_MAP(self, data=None,
-                   initial_guess={'m': -2, 'logl': 4},
+                   initial_guess={'m': -2, 'logl': 4, 'p': -1},
                    N=50):
         if data is None:
             print("Using existing visibility data...")
@@ -335,6 +335,9 @@ class Frank2D(object):
         if not self._set_MAP_estimator:
             self._MAP_estimator = MAPEstimator(self._Rmax, N=N)
             self._set_MAP_estimator = True
+        
+        print("===>  Searching for MAP parameters...")
+        print("        + Initial guess: ", initial_guess)
 
         self._MAP_estimator.optimize(data, initial_guess)
         self._MAP = self._MAP_estimator.MAP
