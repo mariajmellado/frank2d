@@ -215,7 +215,12 @@ class Frank2D(object):
                 Weights = data["weights"]
             except KeyError:
                 raise ValueError("data dictionary must contain 'u', 'v', 'vis' and 'weights' keys.")
-
+            # corroborate that they are cupy arrays.
+            if not isinstance(u, cp.ndarray):
+                u = cp.asarray(u)
+                v = cp.asarray(v)
+                Vis = cp.asarray(Vis)
+                Weights = cp.asarray(Weights)
             u_gridded, v_gridded, vis_gridded, weights_gridded = grid.run(u, v, Vis, Weights,
                                                                           hermitian = hermitian)
             # grid.run may return numpy arrays; convert to cupy
@@ -298,6 +303,13 @@ class Frank2D(object):
                 Weights = data["weights"]
             except KeyError:
                 raise ValueError("data dictionary must contain 'u', 'v', 'vis' and 'weights' keys.")
+
+            # Corroborate that they are CuPy arrays.
+            if not isinstance(u, cp.ndarray):
+                u = cp.asarray(u)
+                v = cp.asarray(v)
+                Vis = cp.asarray(Vis)
+                Weights = cp.asarray(Weights)
             self.process_vis(data, hermitian = hermitian)
 
         if run_from_scratch:

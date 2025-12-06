@@ -12,11 +12,18 @@ from frank.utilities import convolve_profile
 from astropy.io import fits
 from gofish import imagecube
 
-from frank2d.posterior_optimization import MAPEstimator
+from .posterior_optimization import MAPEstimator
 
 """
 This module contains classes for plotting the results of Frank's 2D algorithm.
 """
+
+plt.rcParams.update({
+    "text.usetex": True,
+    "font.family": "serif",
+    "font.serif": ["Computer Modern Roman"],
+    "text.latex.preamble": r"\usepackage{bm}",
+})
 
 class Plot(object):
     def __init__(self, Frank2D, Geometry):

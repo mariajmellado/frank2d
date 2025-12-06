@@ -16,6 +16,13 @@ from gofish import imagecube
 This module contains classes for plotting the results of Frank's 2D algorithm.
 """
 
+plt.rcParams.update({
+    "text.usetex": True,
+    "font.family": "serif",
+    "font.serif": ["Computer Modern Roman"],
+    "text.latex.preamble": r"\usepackage{bm}",
+})
+
 class Plot(object):
     def __init__(self, Frank2D, Geometry):
         """

@@ -19,6 +19,7 @@ class Gridding(object):
         self._Rmax = Rmax
         self._FT =  FT
 
+        # Bin centers for gridding.
         self._set_grid = False
     
     def set_bins(self, bin_centers_u, bin_centers_v):

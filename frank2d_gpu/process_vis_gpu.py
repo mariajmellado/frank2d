@@ -10,6 +10,7 @@ class Gridding(object):
         self._Rmax = Rmax
         self._FT =  FT
 
+        # Bin centers for gridding.
         self._set_grid = False
     
     def set_bins(self, bin_centers_u, bin_centers_v):
@@ -160,7 +161,6 @@ class Gridding(object):
             vis_gridded = vis_gridded.ravel(order="C")  
             weights_gridded = weights_gridded.ravel(order="C")
             if self._set_grid == False:
-                print("Warning: You are using the default grid from the Fourier Transform object.")
                 u_gridded, v_gridded = self._FT._Un, self._FT._Vn
             else:
                 u_gridded, v_gridded = cp.meshgrid(self._bin_centers_u, self._bin_centers_v)
