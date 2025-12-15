@@ -240,6 +240,12 @@ class MAPEstimator(object):
             'minus_log_posterior': self._minus_log_posteriors,
         }
 
+    @property
+    def Qmax(self):
+        """Maximum radius, unit = arcsec"""
+        return self._FF.Qmax
+
+
 class FourierBesselFitter(object):
     """
     Fourier-Bessel series model for fitting visibilities
@@ -284,6 +290,11 @@ class FourierBesselFitter(object):
     def _fit(self):
         """Fit step. Computes the best fit given the pre-processed data"""
         self.GaussianModel = GaussianModel(self._2DFT, self._M, self._j, self._Rmax)
+    
+    @property
+    def Qmax(self):
+        """Maximum radius, unit = arcsec"""
+        return self._2DFT.Qmax
 
 class VisibilityMapping:
     r"""Builds the mapping between the visibility and image planes.

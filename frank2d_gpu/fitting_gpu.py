@@ -5,6 +5,7 @@ import time
 from tqdm import tqdm
 from .utilities_gpu import DotLinearOperator
 from cupyx.scipy.sparse.linalg import LinearOperator
+import pprint
 
 import numpy as np
 
@@ -13,7 +14,8 @@ class IterativeSolverMethod():
     def __init__(self, u, v, vis, weights, kernel,
                  method_name = 'bicgstab', method_func = None,
                  rtol = 1e-8,  x0 = None, maxiter = None,
-                 precond_type = 'jacobi'):
+                 precond_type = 'jacobi',
+                 verbose = True):
         """
          Class to handle the iterative solver methods.
 
@@ -137,6 +139,7 @@ class IterativeSolverMethod():
 
         bnrm2 = cp.linalg.norm(b)
         tol = max(float(atol), float(rtol) * float(bnrm2))
+        self._fit_info['maxiter'] = maxiter
         self._fit_info['rtol'] = rtol
         self._fit_info['final_tol'] = atol
 
@@ -168,12 +171,8 @@ class IterativeSolverMethod():
         self._tols = []
 
         for iteration in tqdm(range(maxiter), desc="         + Fitting with BiCGStab...", unit=" iterations"):
-            time.sleep(0.05)
             act_tol = float(cp.linalg.norm(r))
             self._tols.append(act_tol)
-            #print(".... iteration: ", iteration)
-            #print("                             ",
-            #      "-> actual tol ", f'{act_tol:.2e}', " versus ", f'{atol:.2e}')
             if act_tol <= tol:
                 self._fit_info['convergence_by'] = "norm of r"
                 self._fit_info['iterations'] = iteration
@@ -227,9 +226,10 @@ class IterativeSolverMethod():
 
             if callback is not None:
                 callback(x)
-            self._fit_info['convergence_by'] = "maxiter"
-            self._fit_info['iterations'] = iteration
-            return x, maxiter
+
+        self._fit_info['convergence_by'] = "maxiter"
+        self._fit_info['iterations'] = iteration
+        return x, maxiter
 
     def build_sparse_linear_system(self):
         """

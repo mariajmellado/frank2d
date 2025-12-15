@@ -51,13 +51,12 @@ class Plot(object):
         self._v_model = self._Frank2D.v_grid
         self._u_model_1d = self._Frank2D.u
         self._v_model_1d = self._Frank2D.v
-        self._vis_model = Frank2D.visibility_model
+
 
         self._x_model = self._Frank2D.x_grid*rad_to_arcsec
         self._y_model = self._Frank2D.y_grid*rad_to_arcsec
         self._x_model_1d = self._Frank2D.x*rad_to_arcsec
         self._y_model_1d = self._Frank2D.y*rad_to_arcsec
-        self._int_model = Frank2D.intensity_model.real
 
         self._int_model_shifted = None
 
@@ -87,13 +86,14 @@ class Plot(object):
         Nx, Ny = self._Nx, self._Ny
         geom = self._Geometry
         vis = None
+        f2d = self._Frank2D
 
         if kind == 'input':
             vis = self._vis_input.reshape((Ny, Nx), order='C')
             u = self._u_input.reshape((Ny, Nx), order='C')
             v = self._v_input.reshape((Ny, Nx), order='C')
         elif kind == 'model':
-            vis = self._vis_model
+            vis = f2d.visibility_model
             u, v = self._u_model, self._v_model
         else:
             raise ValueError("type must be 'input' or 'model'")
@@ -161,13 +161,13 @@ class Plot(object):
         f2d = self._Frank2D
         geom = self._Geometry
         
-        I = self._int_model
+        I = f2d.intensity_model.real
 
         u_grid = self._u_model #(N, N)
         v_grid = self._v_model
         if phase_shift:
             # Only in this scheme (East of North) makes sense to do the phase shifting.
-            vis_ = self._vis_model
+            vis_ = f2d.visibility_model
             vis = geom.apply_phase_shift(-u_grid, -v_grid, vis_)
             I = f2d.transform(vis).real
         
@@ -260,7 +260,7 @@ class Plot(object):
         # model
         u_model = self._u_model
         v_model = self._v_model
-        vis_model = self._vis_model
+        vis_model = f2d.visibility_model
         
         u_model_1d = self._u_model_1d
         v_model_1d = self._v_model_1d
@@ -428,7 +428,7 @@ class Plot(object):
         # model
         u_model = self._u_model
         v_model = self._v_model
-        vis_model = self._vis_model
+        vis_model = f2d.visibility_model
         
         u_model_1d = self._u_model_1d
         v_model_1d = self._v_model_1d
@@ -442,7 +442,7 @@ class Plot(object):
         # phase shift
         vis = geom.apply_phase_shift(-u_model, -v_model, vis_model) # the East of North convention.
         I = f2d.transform(vis).real
-        self._int_model_shifted = I
+        f2d.intensity_model.real_shifted = I
 
         # deproject
         x_model, y_model = geom.deproject_xy(x_model, y_model)
@@ -591,7 +591,7 @@ class Plot(object):
         fig.tight_layout()
         plt.show()
     
-    def MAP_power_spectrum(self, data, MAP_estimator = None):
+    def power_spectrum(self, data, MAP_estimator = None, m = -2, c = 1e8):
         r"""
         Plot the power spectrum of the best parameters found in the posterior optimization.
         Params
@@ -602,18 +602,27 @@ class Plot(object):
         MAP_estimator: MAPEstimator object, optional
             The MAPEstimator object used in the optimization.
             If not provided, it will use the one from the Frank2D object.
+        m: float, optional
+            The slope of the power spectrum.
+        c: float, optional
+            The normalization of the power spectrum.
+        returns
+        -------
+        A plot of the power spectrum.
         """
         f2d = self._Frank2D
-        if MAP_estimator is None:
-            if f2d._MAP_estimator is None:
-                raise ValueError("MAPEstimator object not provided.")
-            self._MAP_estimator = f2d._MAP_estimator
-        else:
-            if isinstance(MAP_estimator, MAPEstimator) is False:
-                raise ValueError("MAP_estimator must be an instance of MAPEstimator class.")
-            self._MAP_estimator = MAP_estimator
 
-        ME = self._MAP_estimator
+        if m is None and c is None:
+            if MAP_estimator is None:
+                if f2d._MAP_estimator is None:
+                    raise ValueError("MAPEstimator object not provided.")
+                self._MAP_estimator = f2d._MAP_estimator
+            else:
+                if isinstance(MAP_estimator, MAPEstimator) is False:
+                    raise ValueError("MAP_estimator must be an instance of MAPEstimator class.")
+                self._MAP_estimator = MAP_estimator
+                m = ME.MAP['m']
+                c = ME.MAP['c']
 
         # Plot visibilities gridded.
         from frank.utilities import UVDataBinner       
@@ -635,9 +644,10 @@ class Plot(object):
         def linear_power_spectrum(logx, m, c):
             return m*logx + np.log10(c)
 
-        m = ME.MAP['m']
-        c = ME.MAP['c']
-        P = ME.power_spectrum(baselines, m, c)
+        def power_spectrum(baselines, m, c):
+            return c * baselines**m
+
+        P = power_spectrum(baselines, m, c)
 
         lgx = np.log10(np.geomspace(np.sort(baselines)[1], baselines.max(), 1000))
         lgy = linear_power_spectrum(lgx, m, c)
@@ -681,7 +691,7 @@ class Plot(object):
 
             u_model = self._u_model
             v_model = self._v_model
-            vis_model = self._vis_model
+            vis_model = f2d.visibility_model
 
             vis = geom.apply_phase_shift(-u_model, -v_model, vis_model) # the East of North convention.
             self._int_model_shifted = f2d.transform(vis).real
