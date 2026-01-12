@@ -151,7 +151,7 @@ class Gridding(object):
         # Change Nans by 0 in vis.
         # The transpose is because binned_statistic_2d returns (nx, ny) array.
         vis_gridded = np.nan_to_num(vis_gridded_matrix, nan=0).T
-        weights_gridded = weights_gridded_matrix.T
+        weights_gridded = np.nan_to_num(weights_gridded_matrix, nan=0).T
 
         # Imposing hermitian conjugate property.
         if hermitian:

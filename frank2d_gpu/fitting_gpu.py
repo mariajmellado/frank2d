@@ -240,6 +240,9 @@ class IterativeSolverMethod():
         A is I + N^{-1} S_{data}.
         b is (N^{-1} V_{data}).
         """
+        import cupy as cp
+        import cupyx.scipy.sparse as cxs
+        from cupyx.scipy.sparse.linalg import LinearOperator
 
         weights = self._weights
         vis = self._vis
@@ -261,11 +264,53 @@ class IterativeSolverMethod():
 
         preconditioner = self._preconditioner
         self._fit_info['preconditioner_method'] = preconditioner
+
         if preconditioner == "jacobi":
             # Preconditioner matrix M = diag(A)^{-1}.
             diagA = A.diagonal()
             M = cxs.csr_matrix((1.0/diagA, cp.arange(N), cp.arange(N+1)), shape=(N, N))
             M = DotLinearOperator(M, M.shape)
+
+        elif preconditioner == "ilu":
+            # --- ADAPTACION HIBRIDA GPU -> CPU ---
+            import scipy.sparse.linalg as spla
+            import scipy.sparse as sp
+
+            print('        !  Transferring matrix to CPU for ILU factorization...')
+            start_time = time.time()
+            
+            # 1. Traer A de GPU a CPU
+            A_cpu = A.get() 
+
+            # 2. Convertir a CSC para SciPy (necesario para spilu)
+            if not sp.isspmatrix_csc(A_cpu):
+                A_cpu = A_cpu.tocsc()
+            
+            # 3. Asegurar complex128
+            A_cpu = A_cpu.astype(np.complex128)
+            
+            end_time = time.time()
+            execution_time = end_time - start_time
+            print(f'        +   GPU->CPU & CSC = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
+
+            start_time = time.time()
+            try:
+                # 4. Calcular ILU en CPU usando SciPy
+                ilu = spla.spilu(A_cpu, drop_tol=1e-4, fill_factor=10)
+            except RuntimeError as e:
+                print(f"ILU failed: {e}")
+                ilu = spla.spilu(A_cpu + 1e-8 * sp.eye(A_cpu.shape[0]))
+            
+            end_time = time.time()
+            execution_time = end_time - start_time
+            print(f'        +  ILU (on CPU) = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
+
+            def ilu_solve_wrapper(x):
+                x_cpu = cp.asnumpy(x)       # GPU -> CPU
+                y_cpu = ilu.solve(x_cpu)    # Solve en CPU
+                return cp.asarray(y_cpu)    # CPU -> GPU
+
+            M = LinearOperator(A.shape, matvec=ilu_solve_wrapper)
 
         else:
             raise ValueError(f"Preconditioner method '{preconditioner}' not recognized.")
