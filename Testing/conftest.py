@@ -133,6 +133,54 @@ def add_vis_noise(vis, weights, seed=None):
 
     return vis_noisy
 
+def apply_radial_dropout(weights_1d, N, protection_radius=0.3, dropout_prob=0.4, seed=None):
+    """
+    Applies a radial dropout mask to the weights array.
+    
+    The center of the uv-plane is protected (kept at 1.0), while the 
+    outer regions are randomly zeroed out to simulate flagged data.
+
+    Parameters
+    ----------
+    weights_1d : ndarray
+        The 1D flattened weights array of size N*N.
+    N : int
+        Grid size per side.
+    protection_radius : float
+        Fraction of the radius (0 to 1) that will be protected from dropouts.
+    dropout_prob : float
+        Probability of zeroing out a pixel in the outer region.
+    seed : int, optional
+        Random seed for reproducibility.
+
+    Returns
+    -------
+    ndarray
+        Flattened weights array with applied radial dropouts.
+    """
+    if seed is not None:
+        np.random.seed(seed)
+
+    # 1. Reshape to 2D for spatial operations
+    weights_2d = weights_1d.reshape((N, N))
+    
+    # 2. Create normalized radial coordinate system
+    val = np.linspace(-1, 1, N)
+    X, Y = np.meshgrid(val, val)
+    R = np.sqrt(X**2 + Y**2)
+    
+    # 3. Define the region eligible for dropouts
+    outer_mask = R > protection_radius
+    
+    # 4. Generate and apply the random dropout
+    random_noise = np.random.random((N, N))
+    dropout_mask = (random_noise < dropout_prob)
+    
+    # Only zero out if it is in the outer region AND selected by the probability
+    weights_2d[outer_mask & dropout_mask] = 0.0
+    
+    return weights_2d.ravel()
+
 # =============================================================================
 # VISIBILITY SAMPLING (GALARIO-LIKE IMPLEMENTATION)
 # =============================================================================
@@ -258,7 +306,8 @@ def simulated_obs(N = 50, Rmax = 2.0):
     # --- 2. Generate Coordinate Grid ---
     # We use the project's own logic to define the (u, v) points
     # This ensures perfect alignment between testing and execution
-    FT = FourierTransform2D(Rmax, N)
+    Rmax_rad = Rmax / rad_to_arcsec
+    FT = FourierTransform2D(Rmax_rad, N)
     u, v = FT.uv_points
     dxy_rad = FT.dx
 
@@ -268,6 +317,13 @@ def simulated_obs(N = 50, Rmax = 2.0):
     
     # --- 4. Add Noise & Weights ---
     weights = np.ones_like(u)
+    weights = apply_radial_dropout(
+        weights, 
+        N, 
+        protection_radius=0.50, # 25% inner core protected
+        dropout_prob=0.5,       # 50% chance of flagging in outskirts
+        seed=46
+    )
     vis_noisy = add_vis_noise(vis_clean, weights, seed=46)
 
     #plt.imshow(np.log(np.abs(vis_noisy.reshape(N, N))))
