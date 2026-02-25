@@ -1,6 +1,11 @@
-/Notebooks/*.pkl
-/Notebooks/*.pickle
-/Notebooks/*.fits
-/Notebooks/**/*.fits
+Scripts/
+Results/
+ResearchNotebooks/
+/ResearchNotebooks/*.pkl
+/ResearchNotebooks/*.pickle
+/ResearchNotebooks/*.fits
+/ResearchNotebooks/**/*.fits
 .DS_Store
 __pycache__/*.pyc
+__pycache__/
+.ipynb_checkpoints/
