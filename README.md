@@ -1,6 +1,8 @@
 # Frank2D: Non-axisymmetric Visibility Fitting with Gaussian Processes
 
-**Frank2D** is a high-performance numerical framework designed to reconstruct high-fidelity images of protoplanetary discs from interferometric visibilities. By extending the Gaussian Process (GP) framework to two dimensions of the frankenstein algorithm (Jennings et al. 2020), this algorithm removes the assumption of azimuthal symmetry, enabling the modeling of complex substructures like spirals and vortices directly in the Fourier plane.
+<img src="./Static/Portada.png" style="background-color:white;">
+
+**Frank2D** is a framework designed to reconstruct high-fidelity images of protoplanetary discs from interferometric visibilities. By extending the Gaussian Process (GP) framework to two dimensions of the frankenstein algorithm (Jennings et al. 2020), this algorithm removes the assumption of azimuthal symmetry, enabling the modeling of complex substructures like spirals and vortices directly in the Fourier plane.
 
 
 

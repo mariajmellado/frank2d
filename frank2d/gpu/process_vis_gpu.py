@@ -1,9 +1,10 @@
 import cupy as cp
 import numpy as np
 import time
+from ..logger import Logger
 
 class Gridding(object):
-    def __init__(self, Rmax, FT):
+    def __init__(self, Rmax, FT, verbose = False):
         """
         Class to grid visibilities in a regular grid (CuPy backend).
         Parameters
@@ -20,6 +21,8 @@ class Gridding(object):
 
         # Bin centers for gridding.
         self._set_grid = False
+        self._verbose = verbose
+        self.show = Logger(verbose=verbose)
     
     def set_bins(self, bin_centers_u, bin_centers_v):
         """
@@ -156,7 +159,7 @@ class Gridding(object):
 
         if unshift == True:
             # Unshifted grid.
-            print("Unshiftting grid..")
+            self.show.info("        + Unshiftting grid..")
             vis_gridded = cp.fft.fftshift(vis_gridded).ravel(order="C") 
             weights_gridded = cp.fft.fftshift(weights_gridded).ravel(order="C") 
             if self._set_grid == False:
@@ -259,9 +262,11 @@ class Gridding(object):
 
 
 class PostProcess(object):
-    def __init__(self, gridded_data, Nx, Ny):
+    def __init__(self, gridded_data, Nx, Ny, verbose=False):
         self._gridded_data = gridded_data
         self._Nx, self._Ny = Nx, Ny
+        self._verbose = verbose
+        self.show = Logger(verbose=verbose)
     
     def separate_data(self):
         """
@@ -322,7 +327,7 @@ class PostProcess(object):
         V_full : 2D array, unit: Jy
             Full visibility model on a Nx x Ny grid.
         """
-        print("Building full visibility model...")
+        self.show.info("        + Building full visibility model...")
         start_time = time.time()
 
         index_w = self._gridded_data_postprocess["index_weighted"]
@@ -337,7 +342,7 @@ class PostProcess(object):
 
         index_uw = self._gridded_data_postprocess["index_unweighted"]
         if len(index_uw) == 0:
-            print("No unweighted data found. Returning weighted visibility model only.")
+            self.show.warning("No unweighted data found. Returning weighted visibility model only.")
             V_full = cp.zeros((self._Nx, self._Ny), dtype="c16")
             V1 = S11.matvec(vis_sol_weighted)
             data_coords_w = cp.unravel_index(index_w, (self._Nx, self._Ny))
@@ -349,12 +354,11 @@ class PostProcess(object):
             vis_uw = data_uw["vis"]
             weights_uw = data_uw["weights"]
             start_time = time.time()
-            print("     + Setting kernel..")           
+            self.show.info("        + Setting kernel..")           
             kernel2 = kernel(kernel_params, u_w, v_w, u2 = u_uw, v2 = v_uw)
             S_12_T = kernel2.sparse()
             end_time = time.time()
             execution_time = end_time - start_time
-            print(f'--> time building S_12_T = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
 
             # Build full visibility model.
             V1 = S11.matvec(vis_sol_weighted)
@@ -370,6 +374,5 @@ class PostProcess(object):
 
         end_time = time.time()
         execution_time = end_time - start_time
-        print(f'--> times building full visibility model = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
 
         return V_full

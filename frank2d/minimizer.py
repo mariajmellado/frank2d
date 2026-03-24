@@ -2,10 +2,6 @@ import numpy as np
 from scipy.optimize import minimize_scalar
 from scipy.optimize import minimize
 
-"""
-This class is exactly the same that the one in cpu folder. 
-We allow the duplicate for extensibility in the future, if we want to implement a different minimizer for GPU.
-"""
 class Minimizer():
     def __init__(self, fun, guess, sol):
         """
@@ -132,27 +128,3 @@ class Powell(Minimizer):
         Current guess for the minimum.
         """
         return self._x
-    
-        
-class Scipy(Minimizer):
-    """Wrapper around scipy's minimize function."""
-    def __init__(self, fun, guess, bounds = None):
-        """
-        Params
-        ------
-        fun : callable
-            The function to minimize. Should take a 1D array and return a scalar.
-        guess : array-like
-            Initial guess for the minimum.
-        """
-        super().__init__(fun, guess, guess)
-        self._bounds = bounds
-
-    def run(self):
-        """
-        Run the minimizer until convergence.
-        """
-        res = minimize(self._fun, self._x, method='Nelder-Mead', tol=1e-2, bounds = self._bounds)
-        sucess = res.success
-        print("Minimization success:", sucess)
-        self._sol = res.x

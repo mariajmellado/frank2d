@@ -8,13 +8,14 @@ import pprint
 from tqdm import tqdm
 
 from .utilities import DotLinearOperator
+from ..logger import Logger
 
 class IterativeSolverMethod():
     def __init__(self, u, v, vis, weights, kernel,
                  method_name = 'bicgstab', method_func = None,
                  rtol = 1e-8,  x0 = None, maxiter = None,
                  precond_type = 'jacobi',
-                 verbose = True):
+                 verbose = False):
         """
          Class to handle the iterative solver methods.
 
@@ -63,6 +64,7 @@ class IterativeSolverMethod():
         self._fit_info = {}
 
         self._verbose = verbose
+        self.show = Logger(self._verbose)
 
     def get_solver(self):
         """
@@ -76,7 +78,7 @@ class IterativeSolverMethod():
         elif solver == 'bicgstab':
             return self.bicgstab
         else:
-            raise ValueError(f"Solver method '{solver}' not recognized.")
+            self.show.error(f"Solver method '{solver}' not recognized.")
     
     def set_solver(self, solver_func):
         """
@@ -299,13 +301,11 @@ class IterativeSolverMethod():
 
         self._tols = []
     
-        for iteration in tqdm(range(maxiter), desc="         + Fitting with BiCGStab...", unit=" iterations"):
+        for iteration in tqdm(range(maxiter), desc="        +  Fitting", unit=" iterations", disable=not self._verbose):
             time.sleep(0.05)
             act_tol = np.linalg.norm(r)
             self._tols.append(act_tol)
-            #if iteration % 100 == 0:
-            #    print("                 ",
-            #        " actual tol ", f'{act_tol:.2e}', " versus ", f'{atol:.2e}')
+
             if act_tol < atol:
                 self._fit_info['convergence_by'] = "norm of r"
                 self._fit_info['iterations'] = iteration
@@ -383,7 +383,7 @@ class IterativeSolverMethod():
         kernel_csr = self._kernel.sparse_matrix()
         end_time = time.time()
         execution_time = end_time - start_time
-        print(f'        +  Kernel = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
+        self.show.info(f'        +  Kernel = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
 
         N = kernel_csr.shape[0]
 
@@ -411,7 +411,7 @@ class IterativeSolverMethod():
                 A = A.tocsc()
             end_time = time.time()
             execution_time = end_time - start_time
-            print(f'        +   CSC = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
+            self.show.info(f'        +   CSC = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
 
              # ILU requires complex128 dtype.
             A = A.astype(np.complex128)
@@ -420,16 +420,16 @@ class IterativeSolverMethod():
             try:
                 ilu = spla.spilu(A, drop_tol=1e-4, fill_factor=10)
             except RuntimeError as e:
-                print(f"ILU failed: {e}")
+                self.show.warning(f"ILU failed: {e}")
                 ilu = spla.spilu(A + 1e-8 * sp.eye(A.shape[0]))
             end_time = time.time()
             execution_time = end_time - start_time
-            print(f'        +  ILU = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
+            self.show.info(f'        +  ILU = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
 
              # Preconditioner as a linear operator.
             M = LinearOperator(A.shape, matvec=ilu.solve)
         else:
-            raise ValueError(f"Preconditioner '{preconditioner}' not recognized.")
+            self.show.error(f"Preconditioner '{preconditioner}' not recognized.")
 
         b = weights * vis
 
@@ -478,17 +478,17 @@ class IterativeSolverMethod():
             The solution vector (V*). Unit = Jy.
         """
         # Create the linear system.
-        print("===>  Creating sparse linear system...")
+        self.show.info("===>  Creating sparse linear system...")
         start_time = time.time()
 
         self.build_sparse_linear_system()
 
         end_time = time.time()
         execution_time = end_time - start_time
-        print(f'        +  Building system = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
+        self.show.info(f'        +  Building system = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
 
         # Solve the linear system.
-        print("===>  Solving linear system...")
+        self.show.info("===>  Solving linear system...")
         start_time = time.time()
         if self._solver_func is not None:
             self.set_solver(self._solver_func)
@@ -500,24 +500,24 @@ class IterativeSolverMethod():
 
         end_time = time.time()
         execution_time = end_time - start_time
-        print(f'            +  BiCGStab = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
+
+        self._fit_info['solver_method'] = self._solver_name
+        self._fit_info['solver_time_sec'] = execution_time
 
         x, info = self._solution_linear_system
 
         # Report on the success of the fitting.
-        fit_correctly = np.allclose( self._A.matvec(x),
-                                     self._b,
-                                     rtol=self._tol_fit_correctly
-                                    )
-        fit_correctly_bool = self.fit_correctly(fit_correctly)
+        fit_value = np.allclose( self._A.matvec(x),
+                                 self._b,
+                                 rtol=self._tol_fit_correctly
+                                )
 
         self._fit_data['tols'] = self._tols
         self._fit_info['CGM_converged'] = (info == 0)
-        self._fit_info['Fit_correctly'] = fit_correctly
+        self._fit_info['Fit_correctly'] = self.fit_correctly(fit_value)
 
-        if self._verbose:
-            pprint.pprint(self._fit_info)
-
+        info = pprint.pformat(self._fit_info, indent = 15)[1:][:-1]
+        self.show.info(f"        +  Fit info: \n" + info)
         self._solution = x
 
         return x

@@ -1,4 +1,5 @@
 from scipy.sparse.linalg import LinearOperator
+import logging
 
 """
 This module provides utility functions for Frank2D package.
@@ -22,7 +23,6 @@ def linear_operator(matrix, size):
         return matrix.dot(x)
 
     return LinearOperator(size, matvec=matvec)
-
 
 class DotLinearOperator(LinearOperator):
     def __init__(self, matrix, shape):

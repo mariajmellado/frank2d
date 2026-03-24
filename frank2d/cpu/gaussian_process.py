@@ -104,13 +104,10 @@ class CorrelationMatrix():
         params = self._params
 
         if 'm' in params:
-            print("Updating m to ", params["m"])
             self._m = params["m"]
         if 'c' in params:
-            print("Updating c to ", params["c"])
             self._c = params["c"]
         if 'l' in params:
-            print("Updating l to ", params["l"])
             self._l = params["l"]
     
     def update_params(self, params):
@@ -132,7 +129,7 @@ class CorrelationMatrix():
         self._params = params
         self.parse_params(params)
 
-    def set_r():
+    def set_r(self):
         if not self._set_r:
             self._r =  np.sqrt((self._u - self._u2)**2 + (self._v - self._v2)**2)
             self._set_r = True
@@ -299,7 +296,7 @@ class Wendland(CorrelationMatrix):
         elif k == 2:
             return (35/3)*r**2 +6*r + 1  # P_2(r) = (35/3)r^2 + 6r + 1
         else:
-            raise ValueError("k must be 0, 1, or 2.")
+            self.show.error("k must be 0, 1, or 2.")
 
     def row(self, i, u1=None, v1=None, q1=None):
         """
@@ -376,5 +373,3 @@ class Wendland(CorrelationMatrix):
         factor[r_normalized > 1] = 0
 
         return amplitude * factor * self.P_k(r_normalized, self._k)
-        
-

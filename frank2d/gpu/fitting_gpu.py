@@ -2,7 +2,7 @@ import cupy as cp
 import cupyx.scipy.sparse as cxs
 import cupyx.scipy.linalg as spla
 from cupyx.scipy.sparse.linalg import LinearOperator
-
+from ..logger import Logger
 
 import time
 from tqdm import tqdm
@@ -17,7 +17,7 @@ class IterativeSolverMethod():
                  method_name = 'bicgstab', method_func = None,
                  rtol = 1e-8,  x0 = None, maxiter = None,
                  precond_type = 'jacobi',
-                 verbose = True):
+                 verbose = False):
         """
          Class to handle the iterative solver methods.
 
@@ -66,6 +66,7 @@ class IterativeSolverMethod():
         self._fit_info = {}
 
         self._verbose = verbose
+        self.show = Logger(verbose = verbose)
 
     def get_solver(self):
         """
@@ -75,7 +76,7 @@ class IterativeSolverMethod():
         if solver == 'bicgstab':
             return self.bicgstab
         else:
-            raise ValueError(f"Solver method '{solver}' not recognized.")
+            self.show.error(f"Solver method '{solver}' not recognized.")
     
     def set_solver(self, solver_func):
         """
@@ -171,7 +172,7 @@ class IterativeSolverMethod():
 
         self._tols = []
 
-        for iteration in tqdm(range(maxiter), desc="         + Fitting with BiCGStab...", unit=" iterations"):
+        for iteration in tqdm(range(maxiter), desc="        +  Fitting", unit=" iterations", disable=not self._verbose):
             act_tol = float(cp.linalg.norm(r))
             self._tols.append(act_tol)
             if act_tol <= tol:
@@ -249,7 +250,7 @@ class IterativeSolverMethod():
         kernel_csr = self._kernel.sparse_matrix()
         end_time = time.time()
         execution_time = end_time - start_time
-        print(f'        +  Kernel = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
+        self.show.info(f'        +  Kernel = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
 
         N = kernel_csr.shape[0]
 
@@ -273,7 +274,7 @@ class IterativeSolverMethod():
             import scipy.sparse.linalg as spla
             import scipy.sparse as sp
 
-            print('        !  Transferring matrix to CPU for ILU factorization...')
+            self.show.info('        !  Transferring matrix to CPU for ILU factorization...')
             start_time = time.time()
     
             A_cpu = A.get()
@@ -283,19 +284,19 @@ class IterativeSolverMethod():
             
             end_time = time.time()
             execution_time = end_time - start_time
-            print(f'        +   GPU->CPU & CSC = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
+            self.show.info(f'        +   GPU->CPU & CSC = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
 
             start_time = time.time()
             try:
                 # 4. Calcular ILU en CPU usando SciPy
                 ilu = spla.spilu(A_cpu, drop_tol=1e-4, fill_factor=10)
             except RuntimeError as e:
-                print(f"ILU failed: {e}")
+                self.show.warning(f"ILU failed: {e}")
                 ilu = spla.spilu(A_cpu + 1e-8 * sp.eye(A_cpu.shape[0]))
             
             end_time = time.time()
             execution_time = end_time - start_time
-            print(f'        +  ILU (on CPU) = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
+            self.show.info(f'        +  ILU (on CPU) = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
 
             def ilu_solve_wrapper(x):
                 x_cpu = cp.asnumpy(x)       # GPU -> CPU
@@ -305,7 +306,7 @@ class IterativeSolverMethod():
             M = LinearOperator(A.shape, matvec=ilu_solve_wrapper)
 
         else:
-            raise ValueError(f"Preconditioner method '{preconditioner}' not recognized.")
+            self.show.error(f"Preconditioner method '{preconditioner}' not recognized.")
             
         b = cp.asarray(weights * vis)
 
@@ -358,17 +359,17 @@ class IterativeSolverMethod():
             The solution vector (V*). Unit = Jy.
         """
         # Create the linear system.
-        print("===>  Creating sparse linear system...")
+        self.show.info("===>  Creating sparse linear system...")
         start_time = time.time()
 
         self.build_sparse_linear_system()
 
         end_time = time.time()
         execution_time = end_time - start_time
-        print(f'        +  Building system = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
+        self.show.info(f'        +  Building system = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
 
         # Solve the linear system.
-        print("===>  Solving linear system...")
+        self.show.info("===>  Solving linear system...")
         start_time = time.time()
         if self._solver_func is not None:
             self.set_solver(self._solver_func)
@@ -380,26 +381,25 @@ class IterativeSolverMethod():
 
         end_time = time.time()
         execution_time = end_time - start_time
-        print(f'            +  BiCGStab = {execution_time/60 :.2f}  min | {execution_time: .2f} seconds')
+
+        self._fit_info['solver_method'] = self._solver_name
+        self._fit_info['solver_time_sec'] = execution_time
 
         x, info = self._solution_linear_system
 
         # Report on the success of the fitting.
-        fit_correctly = np.allclose( self._A.matvec(x),
+        fit_value = np.allclose( self._A.matvec(x),
                                      self._b,
                                      rtol=self._tol_fit_correctly
                                     )
 
-        print("          + CGM converged?  ", info == 0)
-        print("          + Fit correctly?  ", self.fit_correctly(fit_correctly))
-
         # save results
         self._fit_data['tols'] = self._tols
         self._fit_info['CGM_converged'] = (info == 0)
-        self._fit_info['Fit_correctly'] = fit_correctly
+        self._fit_info['Fit_correctly'] = self.fit_correctly(fit_value)
 
-        if self._verbose:
-            pprint.pprint(self._fit_info)
+        info = pprint.pformat(self._fit_info, indent = 15)[1:][:-1]
+        self.show.info(f"        +  Fit info: \n" + info)
         self._solution = x
 
         return x
@@ -420,6 +420,7 @@ class IterativeSolverMethod():
             return " ✔✔✔✔✔✔✔ Sucess.."
         else:
             return " ✘✘✘✘✘✘ Failed.."
+
 
     @property
     def solution(self):

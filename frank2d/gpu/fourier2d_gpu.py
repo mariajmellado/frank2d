@@ -55,8 +55,6 @@ class FourierTransform2D(object):
         self._Un_unshifted = None
         self._Vn_unshifted = None
 
-        self._in = True
-
     def coefficients(self, u=None, v=None, direction="forward"):
         """
         Compute the coefficients of the 2D-DFT matrix.
@@ -150,6 +148,11 @@ class FourierTransform2D(object):
                                  "".format(['forward', 'backward']))
 
     @property
+    def N(self):
+        """ Number of collocation points in each direction."""
+        return self._N
+
+    @property
     def q(self):
         """ Radial collocation points in the frequency plane"""
         return cp.hypot(self._Un, self._Vn)
@@ -166,8 +169,20 @@ class FourierTransform2D(object):
 
     @property
     def Qmax(self):
-        """ Maximum value of the u coordinate in rad^-1"""
+        """ Maximum value of the u coordinate in lambda"""
         return cp.max(self.q)
+
+    @property
+    def Qmin(self):
+        """ Minimum value of the u coordinate in lambda"""
+        return cp.min(self.q)
+
+    @property
+    def Qmin2(self):
+        """ Minimum value of the u coordinate in lambda, excluding zero"""
+        q = self.q
+        q_nonzero = q[q != 0]
+        return cp.min(q_nonzero)
     
     @property
     def u(self):
@@ -223,5 +238,6 @@ class FourierTransform2D(object):
         return self._Un, self._Vn
 
     @property
-    def collocation_points(self):
-        return cp.array([self._Xn, self._Yn]), cp.array([self._Un, self._Vn])
+    def xy_points(self):
+        """ Collocation points in the image plane"""
+        return self._Xn, self._Yn

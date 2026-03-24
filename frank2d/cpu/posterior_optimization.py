@@ -1,37 +1,37 @@
-import numpy as np
-import time
-import logging
-import scipy
-from scipy.special import gamma
-from .constants import rad_to_arcsec, deg_to_rad
-from .fourier2d import FourierTransform2D
-from .minimizer import Powell
-from .gaussian_process import Wendland
-
 import abc
+import time
+import scipy
+import logging
+import numpy as np
 import matplotlib.pyplot as plt
+from scipy.special import gamma
+import pprint
+
+from ..constants import rad_to_arcsec, deg_to_rad
+from ..minimizer import Powell
+from ..logger import Logger
+
+from .fourier2d import FourierTransform2D
+from .gaussian_process import Wendland
 
 """
 This module is based in classes and functions contained in Frankenstein-1D algorithm for fitting visibilities.
 """
 class MAPEstimator(object):
-    def __init__(self, Rmax, N = 50, minimizer = Powell):
+    def __init__(self, Rmax, N_opt = 50, verbose = False):
         """
         Maximum A Posteriori Estimator for the parameters of the Gaussian Process
         Params
         ------
         Rmax : float
             Maximum radius to model, in arcseconds.
-        N : int, optional
+        N_opt : int, optional
             Number of radial points to use in the model. Default is 50.
             If use N > 50, the optimization can be very slow.
         """
         self._Rmax = Rmax
-        self._N = N
-        self._FF = FourierBesselFitter(self._Rmax, N)
-
-        self._set_minimizer = False
-        self._minimizer = minimizer
+        self._N = N_opt
+        self._FF = FourierBesselFitter(self._Rmax, self._N, verbose = verbose)
 
         # Optimization results.
         self._times = []
@@ -44,39 +44,55 @@ class MAPEstimator(object):
         self._minus_log_posteriors = []
 
         self._best = {}
+
+        self._verbose = verbose
+        self.show = Logger(self._verbose)
+
+    def set_initial_guess(self, initial_guess):
+        """
+        Set the initial guess for the parameters m, c and l.
+        Params
+        ------
+        initial_guess : dict
+            Initial guess for the parameters m, c and l. Must contain the keys 'm', 'c' and 'l'.
+        """
+        self._initial_guess = self.process_initial_guess(initial_guess)
     
-    def set_minimizer(self, minimizer, initial_guess = {"m": -2, "logl": 4, "p": -2}):
+    def set_minimizer(self):
         """
         Set the minimizer to use for the posterior optimization.
         """
-        initial_guess = self.process_initial_guess(initial_guess)
-
-        self._minimizer = minimizer(self.eval_prob, initial_guess)
-        self._set_minimizer = True
+        initial_guess = self._initial_guess
+        self._minimizer = Powell(self.eval_prob, initial_guess)
 
     def process_initial_guess(self, initial_guess):
         """
         Process the initial guess for the parameters.
-        Is assumed that  logc = p - 5*m. p is always initialized to -2.
+        Is assumed that  logc = logpy - logpx*m.
         Params
         ------
         initial_guess : dict, optional
-            Initial guess for the parameters m and logl. If None, use m = -2 and logl = 4.
+            Initial guess for the parameters m, c and l.
+            Must contain the keys 'm', 'logpx', 'logpy' and 'l'.
         """
+        self.show.info("===> Setting the initial guess...")
         params = {}
-        if 'p' not in initial_guess:
-            raise ValueError("Initial guess must contain 'p' parameter.")
+        if 'logpx' not in initial_guess:
+            self.show.error("Initial guess must contain 'logpx' parameter.")
+        if 'logpy' not in initial_guess:
+            self.show.error("Initial guess must contain 'logpy' parameter.")
         if 'm' not in initial_guess:
-            raise ValueError("Initial guess must contain 'm' parameter.")
-        if 'logl' not in initial_guess:
-            raise ValueError("Initial guess must contain 'logl' parameter.")
+            self.show.error("Initial guess must contain 'm' parameter.")
+        if 'l' not in initial_guess:
+            self.show.error("Initial guess must contain 'l' parameter.")
 
-        params['p'] = float(initial_guess['p'])  # Fixed relation: logc = p - 5*m
+        self._logpx = float(initial_guess['logpx'])
+        params['logp'] = float(initial_guess['logpy'])
         params['m'] = float(initial_guess['m'])
-        params['l'] = float(10**initial_guess['logl'])
+        params['l'] = float(initial_guess['l'])
 
         # the order is important.
-        self._params_order = ['p', 'm', 'l']
+        self._params_order = ['logp', 'm', 'l']
         list_params = [params[key] for key in self._params_order]
         return list_params
     
@@ -88,16 +104,17 @@ class MAPEstimator(object):
         data : dict
             Dictionary containing the data to fit. Must contain the keys 'u', 'v', 'vis', and 'weights'.
         """
-        print("Fitting the visibilities with Frank2D with 2DFT...")
+        self.show.info("===>  Fitting visibilities with 2DFT...")
         start_time = time.time()
 
         u, v, vis, weights = data['u'], data['v'], data['vis'], data['weights']
         self._FF.fit(u, v, vis, weights)
 
         end_time = time.time()
-        print(f" + Time to preprocess the visibilities: {end_time - start_time:.2f} seconds")
+        self.show.info(f"        --- Time to preprocess the visibilities: {end_time - start_time:.2f} seconds ---")
 
         self._GM = self._FF.GaussianModel
+        self._GM._verbose = self._verbose
         self._minus_log_posterior = self._GM.minus_log_posterior
 
     def process_x_minimizer(self, x):
@@ -106,19 +123,22 @@ class MAPEstimator(object):
         Params
         ------
         x : array-like
-            Parameters to process. By default, x contains p, m, l.
+            Parameters to process. By default, x contains logp, m, l.
         """
         # Follow the order defined in self._params_order and asign the values of x.
         params = { key: x[i] for i, key in enumerate(self._params_order) }
         m = params['m']
         l = params['l']
-        p  = params['p']
-        logc = p - 5*m
+        logpx  = self._logpx
+        logp  = params['logp']
+        logc = logp - logpx*m
         c = 10**logc
 
+        self.show.info("        +  m = {:.2f}, c = {:.2e}, l = {:.2e}".format(m, c, l))
         return {'m': m, 'c': c, 'l': l}
 
-    def optimize(self, data, initial_guess = {"p": -2, "m": -2, "logl": 4}):
+    def optimize(self, data,
+                       initial_guess = {"m": -2, "l": 1e4,  "logpx": 5, "logpy": -2}):
         """
         Optimize the posterior to find the MAP estimate of the parameters.
         Params
@@ -126,30 +146,27 @@ class MAPEstimator(object):
         data : dict
             Dictionary containing the data to fit. Must contain the keys 'u', 'v', 'vis', and 'weights'.
         initial_guess : dict, optional
-            Initial guess for the parameters m and logl. If None, use m = -2 and logl = 4.
-            The parameter c is always initialized to 10**(-2).
-
+            Initial guess for the parameters m, c and l.
+            Must contain the keys 'm', 'logpx', 'logpy' and 'l'.
         """
+
+        self.set_initial_guess(initial_guess)
+
         # Fit with Frankenstein1D scheme.
         self.create_gaussian_model(data)
 
         p0 = self._get_p0()
         self._p0 = p0
 
-        print("Setting the initial guess...")
-        initial_guess = self.process_initial_guess(initial_guess)
-
-        if not self._set_minimizer:
-            minimizer = Powell(self.eval_prob, initial_guess)
-            self.set_minimizer(Powell)
+        self.set_minimizer()
         
-        print("Optimizing the posterior...")
+        self.show.info("===> Optimizing the posterior...")
         start_time = time.time()
 
         self._minimizer.run()
 
         end_time = time.time()
-        print(f" + Time to optimize the posterior: {end_time - start_time:.2f} seconds")
+        self.show.info(f"        --- Time to optimize the posterior: {end_time - start_time:.2f} seconds ---")
 
         x = self._minimizer.solution
 
@@ -252,7 +269,7 @@ class FourierBesselFitter(object):
     """
 
     def __init__(self, Rmax, N, block_data=True,
-                 block_size=10 ** 5, verbose=True):
+                 block_size=10 ** 5, verbose = False):
         # Assuming optically thick disc by default.
         # Thus, scale height = 0.
 
@@ -264,6 +281,7 @@ class FourierBesselFitter(object):
                                           block_size=block_size,
                                           check_qbounds=False,
                                           verbose=verbose)
+        self._verbose = verbose
 
     def preprocess_visibilities(self, u, v, V, weights):
         r"""Prepare the visibilities for fitting. 
@@ -289,7 +307,8 @@ class FourierBesselFitter(object):
 
     def _fit(self):
         """Fit step. Computes the best fit given the pre-processed data"""
-        self.GaussianModel = GaussianModel(self._2DFT, self._M, self._j, self._Rmax)
+        self.GaussianModel = GaussianModel(self._2DFT, self._M, self._j, self._Rmax,
+                                           verbose = self._verbose)    
     
     @property
     def Qmax(self):
@@ -304,7 +323,7 @@ class VisibilityMapping:
     matrices :math:`M` and :math:`j` used in the fitting. 
     """
     def __init__(self, DFT, block_data=True,
-                 block_size=10 ** 5, check_qbounds=True, verbose=True):
+                 block_size=10 ** 5, check_qbounds=True, verbose=False):
         # Store flags
         self.check_qbounds = check_qbounds
         self._chunking = block_data
@@ -312,6 +331,7 @@ class VisibilityMapping:
         self._2DFT = DFT
 
         self._verbose = verbose
+        self.show = Logger(self._verbose)
    
     def map_visibilities(self, u, v, V, weights):
         r"""
@@ -319,9 +339,8 @@ class VisibilityMapping:
         Optimized for single channel/element usage.
         """
 
-        if self._verbose:
-            logging.info('    Building visibility matrices M and j')
-        
+        self.show.info('        +  Building visibility matrices M and j')
+
         q = np.hypot(u, v)
 
         # Check consistency of the uv points with the model
@@ -430,7 +449,7 @@ class VisibilityMapping:
                                 " low.".format(self.q[0], uv.min()))
 
             if self.q[-1] < uv.max():
-                raise ValueError(r"ERROR: Last collocation point, {:.3e} \lambda, is at"
+                self.show.error(r"ERROR: Last collocation point, {:.3e} \lambda, is at"
                                  " a shorter baseline than the longest deprojected"
                                  r" baseline in the dataset, {:.3e} \lambda. Please"
                                  " increase N in FrankMultFrequencyFitter (this is"
@@ -516,7 +535,7 @@ class GaussianModel:
         D = M^{-1}.
     """
 
-    def __init__(self, DFT, M, j, Rmax):
+    def __init__(self, DFT, M, j, Rmax, verbose = False):
         self._2DFT = DFT
         self._N = int(np.sqrt(M.shape[0]))
         self._Rmax = Rmax
@@ -540,30 +559,31 @@ class GaussianModel:
 
         # Parameters to optimize.
         self.m = -2
-        self.logc = 8
-        self.logl = np.log10(7e4)
+        self.c = 8
+        self.l = 7e4
 
         # Wendland kernel parameters.
         self._r = np.sqrt((u1-u2)**2 + (v1-v2)**2)
         self._j_W, self._k_W = 4, 1
 
-        params = {'m' : self.m, 'c': 10**self.logc, 'l': 10**self.logl}
+        params = {'m' : self.m, 'c': self.c, 'l': self.l}
         self._Wendland = Wendland(params, u1, v1, u2, v2)
 
-        self._verbose = False
+        self._verbose = verbose
+        self.show = Logger(self._verbose)
 
     def fit(self, params):
         """
-        Fit the model with the given parameters m, logc, logl.
+        Fit the model with the given parameters m, c and l.
         Params
         ------
         params : dict
-            Dictionary containing the parameters m, log_c, log_l.
+            Dictionary containing the parameters m, c and l.
         """
         if params is not None:
             self.m = params['m']
-            self.c = 10**params['logc']
-            self.l = 10**params['logl']
+            self.c = params['c']
+            self.l = params['l']
         
         S_real = self.calculate_S_real_space(self.m, self.c, self.l)
         self._Sinv = np.linalg.inv(S_real)
@@ -585,22 +605,18 @@ class GaussianModel:
 
     def preprocess_params(self, params):
         """
-        Preprocess the parameters m, logc, logl.
+        Preprocess the parameters m, c, l.
         Params
         ------
         param : dict
-            Dictionary containing the parameters m, log_c (or c), log_l (or l).
+            Dictionary containing the parameters m, c and l.
         """
         if params is None:
-            raise ValueError("Params cannot be None.")
+            self.show.error("Params cannot be None.")
         m = params['m']
-        if 'logc' in params:
-            c = 10**params['logc']
-        elif 'c' in params:
+        if 'c' in params:
             c = params['c']
-        if 'logl' in params:
-            l = 10**params['logl']
-        elif 'l' in params:
+        if 'l' in params:
             l = params['l']
 
         params_normalized = {'m': m, 'c': c, 'l': l}
@@ -609,7 +625,7 @@ class GaussianModel:
 
     def minus_log_posterior(self, params = None):
         """
-        Calculate the negative log posterior for given parameters m, c, logl.
+        Calculate the negative log posterior for given parameters m, c, l.
         The log posterior is given by
             log P(m, c, l | V) = logP(m,c,l) - 0.5*log|S| + 0.5*log|D| + 0.5*j^T D j
 
@@ -622,9 +638,6 @@ class GaussianModel:
 
         params = self.preprocess_params(params)
         m, c, l = params['m'], params['c'], params['l']
-
-        if self._verbose:
-            print("--> Calculating m_log_posterior with m, logc, logl:", params['m'], np.log10(c), np.log10(l))
 
         # Calculate S in real space.
         S_real  = self.calculate_S_real_space(m, c, l)
@@ -651,11 +664,10 @@ class GaussianModel:
         log_posterior =  (prior - 0.5*self._logdetS + 0.5*self._logdetD + 0.5*self._jDj)
         minus_log_posterior = - log_posterior
 
-        if self._verbose:
-            print("     + m_log_post:", minus_log_posterior)
-            print("     + logdetS:", self._logdetS)
-            print("     + logdetD:", self._logdetD)
-            print("     + jDj:", self._jDj)
+        #self.show.info("     + m_log_post:" +  str(minus_log_posterior))
+        #self.show.info("     + logdetS:" + str(self._logdetS))
+        #self.show.info("     + logdetD:" + str(self._logdetD))
+        #self.show.info("     + jDj:" + str(self._jDj))
 
         return minus_log_posterior
 

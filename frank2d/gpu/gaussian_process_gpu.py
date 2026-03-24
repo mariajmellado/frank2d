@@ -1,13 +1,14 @@
 import cupy as cp
+import numpy as np
 from cupyx.scipy.sparse import csr_matrix
 from .utilities_gpu import DotLinearOperator
 from scipy.spatial import KDTree
 
-import numpy as np
 import time
 
 """
-This module contains classes for constructing Kernel for the Gaussian Process
+This module contains classes for constructing Kernel for the Gaussian Process.
+This class runs in CPU and only the method sparse matrix returns a CuPy array.
 in Frank's 2D algorithm.
 """
 
@@ -39,20 +40,26 @@ class CorrelationMatrix():
         self._params = params
         self.parse_params(params)
 
-        self._u = self._u2 = u
-        self._v = self._v2 = v
-        self._q = self._q2 = cp.hypot(self._u, self._v)
-        self._min_freq = cp.sort(cp.abs(cp.unique(self._v)))[1]
+        self._u = self._u2 = self.to_cpu(u)
+        self._v = self._v2 = self.to_cpu(v)
+        self._q = self._q2 = np.hypot(self._u, self._v)
+        self._min_freq = np.sort(np.abs(np.unique(self._v)))[1]
         self._size = self._size2 = len(u)
 
-        if isinstance(u2, cp.ndarray): # u2 is not None.
-            self._u2 = u2
-            self._v2 = v2
-            self._q2 = cp.hypot(self._u2, self._v2)
+        if isinstance(self.to_cpu(u2), np.ndarray): # u2 is not None.
+            self._u2 = self.to_cpu(u2)
+            self._v2 = self.to_cpu(v2)
+            self._q2 = np.hypot(self._u2, self._v2)
             self._size = len(u2)
-            self._min_freq = cp.minimum(self._min_freq, cp.sort(cp.abs(cp.unique(self._v2)))[1])
-
+            self._min_freq = np.minimum(self._min_freq, np.sort(np.abs(np.unique(self._v2)))[1])
+        
         self._set_r = False
+    
+    def to_cpu(self, val):
+        if isinstance(val, cp.ndarray):
+            return val.get()
+        else:
+            return val
 
     def power_spectrum(self, q, m, c):
         """
@@ -72,20 +79,19 @@ class CorrelationMatrix():
             Power spectrum evaluated at q.
         
         """
-        min_freq = cp.asarray(self._min_freq)
-        
-        q_copy = q.copy() # Evitar modificar el input q
-        q_copy = cp.where(q_copy == 0, min_freq, q_copy)
-        
-        return c * (q_copy**m)
-    
+        if not np.isscalar(q):  
+            q[q == 0] = self._min_freq
+        elif q == 0:
+            q = self._min_freq
+        return c*(q**m)
+            
     def sparse(self):
         """
         Returns the Wendland covariance matrix as a sparse linear operator.
         """
         shape = (self._size, self._size2)
         return  DotLinearOperator(self.sparse_matrix(), shape)
-
+    
     def parse_params(self, params):
         """
         Parse the covariance function parameters
@@ -105,13 +111,10 @@ class CorrelationMatrix():
         params = self._params
 
         if 'm' in params:
-            print("Updating m to ", params["m"])
             self._m = params["m"]
         if 'c' in params:
-            print("Updating c to ", params["c"])
             self._c = params["c"]
         if 'l' in params:
-            print("Updating l to ", params["l"])
             self._l = params["l"]
     
     def update_params(self, params):
@@ -133,10 +136,126 @@ class CorrelationMatrix():
         self._params = params
         self.parse_params(params)
 
-    def set_r():
+    def set_r(self):
         if not self._set_r:
-            self._r =  cp.sqrt((self._u - self._u2)**2 + (self._v - self._v2)**2)
+            self._r =  np.sqrt((self._u - self._u2)**2 + (self._v - self._v2)**2)
             self._set_r = True
+
+
+class SquaredExponential(CorrelationMatrix):
+    def __init__(self, params, u, v, u2 = None, v2 = None):
+        r"""
+        Squared Exponential covariance matrix.
+        The Squared Exponential covariance function, also known as the Gaussian covariance function,
+        is defined as:
+        C(r) = \sigma^2 * exp(-r^2 / (2*l^2))
+        where:
+        - r is the Euclidean distance between two points in space.
+        - \sigma^2  is the variance (amplitude) of the process.
+        - l is the correlation length scale, which determines how quickly the correlation decays with distance.
+        This covariance function is infinitely differentiable, leading to very smooth realizations of the Gaussian Process.
+        """
+
+        super().__init__(params, u, v, u2, v2)
+
+        self._sparse_tol = 1e-30 # higher value means more sparse.
+        self._r_cutoff = np.sqrt(-2.0 * np.log(self._sparse_tol))
+
+        self._ul = self._u/self._l
+        self._vl = self._v/self._l
+
+        self._ul2 = self._u2/self._l
+        self._vl2 = self._v2/self._l
+
+        self._power_spectrum_q1 = self.power_spectrum(self._q, self._m, self._c)
+                    
+    def row(self, i):
+        """
+        Returns the i-th row of the covariance matrix.
+        """
+        amp = np.sqrt(self._power_spectrum_q1 * self.power_spectrum(self._q2[i], self._m, self._c))
+
+        return amp * np.exp(-0.5 * ((self._ul - self._ul2[i]) ** 2 + (self._vl - self._vl2[i]) ** 2))
+    
+    def _row_sparse(self, i, u1_norm, v1_norm, q1):
+        """
+        Internal helper for sparse_matrix.
+        Calculates a subset of row i based on provided normalized coords.
+        """
+        ps = self.power_spectrum(self._q2[i], self._m, self._c)
+        amp = np.sqrt(q1 * ps)
+        
+        r_sq = (u1_norm - self._ul2[i])**2 + (v1_norm - self._vl2[i])**2
+        
+        return amp * np.exp(-0.5 * r_sq)
+
+    def sparse_matrix(self):
+        """
+        Constructs the sparse covariance matrix using the Squared Exponential covariance function.
+        
+        Returns:
+        csr_matrix: scipy.sparse.csr_matrix
+            Sparse covariance matrix in Compressed Sparse Row format.
+            
+        Note:
+        This method constructs an *approximate* sparse covariance matrix.
+        It uses a KDTree to find neighbors within a cutoff radius, r_cutoff,
+        and sets all kernel elements beyond this radius to zero.
+        The cutoff radius is calculated from 'sparse_tol' in the params:
+        r_cutoff = sqrt(-2 * log(sparse_tol))
+        This radius is applied to the coordinates *normalized* by the length scale 'l'.
+        """
+        data = []
+        indices = []
+        indptr = [0]
+
+        coords1 = np.array([self._ul, self._vl]).T
+        coords2 = np.array([self._ul2, self._vl2]).T
+        
+        tree = KDTree(coords1)
+        tree2 = KDTree(coords2)
+        
+        ngb = tree2.query_ball_tree(tree, self._r_cutoff)
+        
+        for i, ngb_i in enumerate(ngb):
+            ngb_i = list(ngb_i)
+            if not ngb_i:
+                indptr.append(len(data))
+                continue
+            
+            row_values = self._row_sparse(i, 
+                                          u1_norm=self._ul[ngb_i], 
+                                          v1_norm=self._vl[ngb_i], 
+                                          q1=self._power_spectrum_q1[ngb_i])
+            
+            data.extend(row_values)
+            indices.extend(ngb_i)
+            indptr.append(len(data))
+        
+        data = cp.asarray(data)
+        indices = cp.asarray(indices)
+        indptr = cp.asarray(indptr)
+
+        size = (self._size, self._size2)
+        kernel_csr = csr_matrix((data, indices, indptr), shape=size)
+
+        return kernel_csr
+
+    def matrix(self, amplitude, l):
+        """
+        Constructs the full covariance matrix using the Squared Exponential covariance function.
+        Parameters:
+        amplitude: float
+            Amplitude of the covariance function.
+        l: float, unit = lambda
+            Correlation length scale.
+        Returns:
+        matrix: np.ndarray
+            Full covariance matrix.
+        """
+        self.set_r()
+        r =  self._r
+        return amplitude * np.exp(-0.5 * (r / l) ** 2)
 
 class Wendland(CorrelationMatrix):
     def __init__(self, params, u, v, u2 = None, v2 = None):
@@ -185,18 +304,24 @@ class Wendland(CorrelationMatrix):
         elif k == 2:
             return (35/3)*r**2 +6*r + 1  # P_2(r) = (35/3)r^2 + 6r + 1
         else:
-            raise ValueError("k must be 0, 1, or 2.")
+            self.show.error("k must be 0, 1, or 2.")
 
-    def row(self, u1, v1, q1, u2_val, v2_val, ps_val):
+    def row(self, i, u1=None, v1=None, q1=None):
+        """
+        Returns the i-th row of the covariance matrix.
+        """
         if u1 is None:
             u1 = self._uh
             v1 = self._vh
             q1 = self._power_spectrum_q1
-        amp = cp.sqrt(q1 * ps_val)
-        r_normalized = cp.sqrt((u1 - u2_val)**2 + (v1 - v2_val)**2)
+
+        ps = self.power_spectrum(self._q2[i], self._m, self._c)
+        amp = np.sqrt(q1 * ps)
+
+        r_normalized = np.sqrt((u1-self._uh2[i])**2 + (v1-self._vh2[i])**2)
         factor = (1 - r_normalized)**self._j
-        factor = cp.where(r_normalized > 1, 0, factor) # Reemplazo de factor[r_normalized > 1] = 0
-        
+        factor[r_normalized > 1] = 0
+
         return amp * factor * self.P_k(r_normalized, self._k)
 
     def sparse_matrix(self):
@@ -213,56 +338,34 @@ class Wendland(CorrelationMatrix):
         of the Wendland function, which is zero beyond a certain distance.
         KDTree is used to efficiently find neighboring points within the support radius.
         """
-        uh_cpu = self._uh.get()
-        vh_cpu = self._vh.get()
-        uh2_cpu = self._uh2.get()
-        vh2_cpu = self._vh2.get()
-        
-        tree = KDTree(np.array([uh_cpu, vh_cpu]).T)
-        tree2 = KDTree(np.array([uh2_cpu, vh2_cpu]).T)
+        data = []
+        indices = []
+        indptr = [0]
+
+        tree = KDTree(np.array([self._uh, self._vh]).T)
+        tree2 = KDTree(np.array([self._uh2, self._vh2]).T)
         ngb = tree2.query_ball_tree(tree, 1.0)
 
-        cpu_indices = []
-        cpu_indptr = [0]
-        cpu_row_indices = []
-        
         for i, ngb_i in enumerate(ngb):
-            n_entries = len(ngb_i)
-            cpu_indices.extend(ngb_i)
-            cpu_indptr.append(cpu_indptr[-1] + n_entries)
-            cpu_row_indices.extend([i] * n_entries)
+            row = self.row(i, self._uh[ngb_i], self._vh[ngb_i], self._power_spectrum_q1[ngb_i])
+            data.extend(row)
+            indices.extend(ngb_i)
+            indptr.append(len(data))
 
-        if not cpu_indices:
-             return csr_matrix((self._size, self._size2))
-
-        col_indices_gpu = cp.asarray(cpu_indices)
-        row_indices_gpu = cp.asarray(cpu_row_indices) 
-        
-        u1_gpu = self._uh[col_indices_gpu]
-        v1_gpu = self._vh[col_indices_gpu]
-        q1_gpu = self._power_spectrum_q1[col_indices_gpu]
-
-        u2_val_gpu = self._uh2[row_indices_gpu]
-        v2_val_gpu = self._vh2[row_indices_gpu]
-        
-        q2_gpu = cp.asarray(self._q2)[row_indices_gpu]
-        ps_val_gpu = self.power_spectrum(q2_gpu, self._m, self._c)
-
-        data_gpu = self.row( u1_gpu, v1_gpu, q1_gpu, 
-                                        u2_val_gpu, v2_val_gpu, 
-                                        ps_val_gpu
-                                    )
-        
-        indptr_gpu = cp.asarray(cpu_indptr)
+        data = cp.asarray(data)
+        indices = cp.asarray(indices)
+        indptr = cp.asarray(indptr)
 
         size = (self._size, self._size2)
-        kernel_csr = cp.sparse.csr_matrix((data_gpu, col_indices_gpu, indptr_gpu), shape=size)
+        kernel_csr = csr_matrix((data, indices, indptr), shape=size)
 
         return kernel_csr
 
     def matrix(self, amplitude, l):
         """
         Constructs the full covariance matrix using the Wendland covariance function.
+
+        Return in CPU because this method is used by the optimzation step that is in CPU.
         Parameters:
         amplitude: float
             Amplitude of the covariance function.
@@ -280,5 +383,3 @@ class Wendland(CorrelationMatrix):
         factor[r_normalized > 1] = 0
 
         return amplitude * factor * self.P_k(r_normalized, self._k)
-        
-
