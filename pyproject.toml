@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "frank2d"
+version = "0.1.0"
+description = "Frankenstein2D Algorithm for Imaging Dust Continuum Emission of Protoplanetary Disks."
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [
+    { name = "María Jesús Mellado Tenorio", email = "maria.mellado@ug.uchile.cl" },
+    { name = "Richard Booth", email = "R.A.Booth@leeds.ac.uk" },
+    { name = "Laura Pérez", email = "lperez@das.uchile.cl" },
+    { name = "Nancy Hitschfeld", email = "nancy@dcc.uchile.cl" },
+]
+keywords = ["astrophysics", "interferometry", "gpu", "cuda", "radioastronomy"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Astronomy",
+]
+
+dependencies = [
+    "numpy>=2.4.2",
+    "scipy>=1.17.1",
+    "matplotlib>=3.10.8",
+    "astropy>=7.2.0",
+    "gofish>=1.6.13",
+    "frank>=1.2.3",
+    "tqdm>=4.67.1",
+]
+
+[project.optional-dependencies]
+gpu = [
+    "cupy-cuda11x>=13.6.0"
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["frank2d*"]

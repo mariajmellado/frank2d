@@ -1,0 +1,23 @@
+Metadata-Version: 2.4
+Name: frank2d
+Version: 0.1.0
+Summary: Frankenstein2D Algorithm for Imaging Dust Continuum Emission of Protoplanetary Disks.
+Author-email: María Jesús Mellado Tenorio <maria.mellado@ug.uchile.cl>, Richard Booth <R.A.Booth@leeds.ac.uk>, Laura Pérez <lperez@das.uchile.cl>, Nancy Hitschfeld <nancy@dcc.uchile.cl>
+Keywords: astrophysics,interferometry,gpu,cuda,radioastronomy
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Classifier: Topic :: Scientific/Engineering :: Astronomy
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: numpy>=2.4.2
+Requires-Dist: scipy>=1.17.1
+Requires-Dist: matplotlib>=3.10.8
+Requires-Dist: astropy>=7.1.0
+Requires-Dist: gofish>=1.6.13
+Requires-Dist: frank>=1.2.3
+Requires-Dist: tqdm>=4.67.1
+Provides-Extra: gpu
+Requires-Dist: cupy-cuda11x>=13.6.0; extra == "gpu"
+
+# frank2d
