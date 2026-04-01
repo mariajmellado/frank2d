@@ -11,7 +11,6 @@ from .constants import rad_to_arcsec, deg_to_rad
 from .geometry import Geometry
 from .minimizer import Powell
 from .logger import Logger
-from .helpers import get_optimal_N
 
 # =============================================================================
 # CPU CORE COMPONENTS (Internal prefixed imports)
@@ -26,6 +25,7 @@ from .cpu import (
     Wendland as _Wendland_CPU,
     SquaredExponential as _SquaredExponential_CPU,
     linear_operator as _linear_operator_CPU,
+    get_optimal_N as _get_optimal_N_CPU,
 )
 
 # =============================================================================
@@ -130,19 +130,12 @@ def linear_operator(*args, use_gpu=False, **kwargs):
         return gpu_module.linear_operator(*args, **kwargs)
     return _linear_operator_CPU(*args, **kwargs)
 
-# =============================================================================
-# DOCSTRING INHERITANCE
-# =============================================================================
+def get_optimal_N(*args, use_gpu=False, **kwargs):
+    """Factory for optimal pixel count calculation."""
+    if use_gpu and HAS_GPU:
+        return gpu_module.get_optimal_N(*args, **kwargs)
+    return _get_optimal_N_CPU(*args, **kwargs)
 
-Frank2D.__doc__ = _Frank2D_CPU.__doc__
-Gridding.__doc__ = _Gridding_CPU.__doc__
-IterativeSolverMethod.__doc__ = _IterativeSolverMethod_CPU.__doc__
-FourierTransform2D.__doc__ = _FourierTransform2D_CPU.__doc__
-Plot.__doc__ = _Plot_CPU.__doc__
-MAPEstimator.__doc__ = _MAPEstimator_CPU.__doc__
-SquaredExponential.__doc__ = _SquaredExponential_CPU.__doc__
-Wendland.__doc__ = _Wendland_CPU.__doc__
-linear_operator.__doc__ = _linear_operator_CPU.__doc__
 
 # =============================================================================
 # PUBLIC API EXPORTS

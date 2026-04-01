@@ -35,14 +35,14 @@ def disk_with_crescent(
     theta0=[np.pi, 0, 0],            # Angle of crescent max (rad)
     amp_asym=[0.5, 0, 0]             # Asymmetry factor
     ):
-    """
+    r"""
     Generate a synthetic disc image with non-axisymmetric substructures.
 
     The model follows the intensity distribution:
-    $$I(R, \Phi) = I_{core}(R) + \sum I_{ring, i}(R, \Phi)$$
+    $$I(R, \phi) = I_{core}(R) + \sum I_{ring, i}(R, \phi)$$
     
     Where asymmetries are introduced via azimuthal modulation:
-    $$1 + A_{asym} \cos(m(\Phi - \theta_0))$$
+    $$1 + A_{asym} \cos(m(\phi - \theta_0))$$
 
     Parameters
     ----------
@@ -134,7 +134,7 @@ def add_vis_noise(vis, weights, seed=None):
     return vis_noisy
 
 def apply_radial_dropout(weights_1d, N, protection_radius=0.3, dropout_prob=0.4, seed=None):
-    """
+    r"""
     Applies a radial dropout mask to the weights array.
     
     The center of the uv-plane is protected (kept at 1.0), while the 
@@ -186,7 +186,7 @@ def apply_radial_dropout(weights_1d, N, protection_radius=0.3, dropout_prob=0.4,
 # =============================================================================
 
 def py_sampleImage(reference_image, dxy, udat, vdat, dRA=0., dDec=0., PA=0., origin='upper'):
-    """
+    r"""
     Original from ``galario``.
     Python implementation of sampleImage.
     
@@ -224,20 +224,20 @@ def py_sampleImage(reference_image, dxy, udat, vdat, dRA=0., dDec=0., PA=0., ori
     dDec *= 2.*np.pi
     du = 1. / (nxy*dxy)
 
-    # --- 1. Fourier Domain Transition ---
+    # Fourier Domain
     # Real-to-Complex FFT with appropriate shifting
     fft_r2c_shifted = np.fft.fftshift(
                         np.fft.rfft2(
                             np.fft.fftshift(reference_image)), axes=0)
     
-    # --- 2. Geometric Transformations ---
+    # Geometric Transformations
     cos_PA, sin_PA = np.cos(PA), np.sin(PA)
     urot = udat * cos_PA - vdat * sin_PA
     vrot = udat * sin_PA + vdat * cos_PA
     dRArot = dRA * cos_PA - dDec * sin_PA
     dDecrot = dRA * sin_PA + dDec * cos_PA
 
-    # --- 3. Grid Interpolation ---
+    # Grid Interpolation
     # Mapping baselines to FFT indices for linear interpolation
     uroti = np.abs(urot)/du
     vroti = nxy/2. + v_origin * vrot/du
@@ -255,7 +255,7 @@ def py_sampleImage(reference_image, dxy, udat, vdat, dRA=0., dDec=0., PA=0., ori
     f_amp = RectBivariateSpline(v_axis, u_axis, np.abs(fft_r2c_shifted), kx=1, ky=1, s=0)
     AmpInt = f_amp.ev(vroti, uroti)
 
-    # --- 4. Phase Correction ---
+    # Phase Correction
     uneg = urot < 0.
     ImInt[uneg] *= -1.
     PhaseInt = np.angle(ReInt + 1j*ImInt)
@@ -297,13 +297,13 @@ def simulated_obs(N = 50, Rmax = 2.0):
         - 'N_test': Grid size for the Frank2D solver.
         - 'Rmax_test': Maximum baseline length for testing (arcsec).
     """
-    # --- 1. Setup Simulation Parameters ---
+    # Setup Simulation Parameters
     pix_scale = (2 * Rmax) / N
     image = DISK_PARAMETRIC_FUNCTION(N=N, pixel_scale_arcsec=pix_scale)
 
     #plt.imshow(image)
     
-    # --- 2. Generate Coordinate Grid ---
+    # Generate Coordinate Grid
     # We use the project's own logic to define the (u, v) points
     # This ensures perfect alignment between testing and execution
     Rmax_rad = Rmax / rad_to_arcsec
@@ -311,11 +311,11 @@ def simulated_obs(N = 50, Rmax = 2.0):
     u, v = FT.uv_points
     dxy_rad = FT.dx
 
-    # --- 3. Sample Visibilities ---
+    # Sample Visibilities
     # The py_sampleImage function (Strategy) calculates V(u,v) from I(x,y)
     vis_clean = py_sampleImage(image, dxy_rad, u, v)
     
-    # --- 4. Add Noise & Weights ---
+    # Add Noise & Weights
     weights = np.ones_like(u)
     weights = apply_radial_dropout(
         weights, 
@@ -335,7 +335,7 @@ def simulated_obs(N = 50, Rmax = 2.0):
         'weights': weights
     }
     
-    # --- 5. Package for Frank2D ---
+    # Package for Frank2D
     return {
         'uvtable': uvtable,
         'N': N,

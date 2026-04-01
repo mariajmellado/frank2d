@@ -4,12 +4,11 @@ from .fitting import IterativeSolverMethod
 from .gaussian_process import SquaredExponential, Wendland
 from .frank2d import Frank2D
 from .plot import Plot
-from .utilities import linear_operator
+from .utilities import linear_operator,get_optimal_N
 from .posterior_optimization import MAPEstimator
 
 from ..constants import rad_to_arcsec, deg_to_rad
 from ..geometry import Geometry
-from ..helpers import get_optimal_N
 
 __all__ = [
     "Frank2D",
