@@ -1,6 +1,7 @@
 from scipy.sparse.linalg import LinearOperator
 from ..constants import rad_to_arcsec
-import logging
+
+import numpy as np
 
 """
 This module provides utility functions for Frank2D package.

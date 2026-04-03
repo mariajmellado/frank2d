@@ -163,7 +163,7 @@ class Gridding(object):
 
         if unshift == True:
             # Unshifted grid.
-            self.Logger("===> Unshiftting grid..")
+            self.show.info("===> Unshiftting grid..")
             vis_gridded = np.fft.fftshift(vis_gridded).ravel(order="C") 
             weights_gridded = np.fft.fftshift(weights_gridded).ravel(order="C") 
             if self._set_grid == False:
