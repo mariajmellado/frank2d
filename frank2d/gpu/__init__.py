@@ -13,7 +13,6 @@ from .posterior_optimization_gpu import MAPEstimator
 __all__ = [
     "Frank2D",
     "Wendland",
-    "linear_operator",
     "Plot",
     "Gridding",
     "IterativeSolverMethod",

@@ -6,32 +6,28 @@ import cupy as cp
 This module provides utility functions for Frank2D package (CuPy backend).
 """
 
-def get_optimal_N(R_max_arcsec, Q_max_lambda, padding=5):
+def get_optimal_N(R_max_arcsec, Q_max_lambda, eta=5):
     """
-    Calculate the optimal number of pixels (N) for the Frank2D algorithm
-    based on the maximum radius (R_max) and maximum spatial frequency (Q_max).
+    Calculate the minimum number of collocation points (N) for the Frank2D
+    algorithm, based on the maximum radius (R_max) and the longest observed
+    baseline (Q_max).
 
-    N must be large enough to capture the spatial frequencies up to Q_max, 
-    and even to ensure symmetry in the Fourier transform (including the zero frequency).
+    The sampling factor eta sets how far the Fourier grid extends past Q_max;
+    the default of 5 places its outer edge roughly 25% beyond the longest
+    observed baseline.
+
     Parameters
     ----------
     R_max_arcsec : float
-        Maximum radius in arcseconds.
+        Maximum radius of the image grid, in arcseconds.
     Q_max_lambda : float
-        Maximum spatial frequency in units of lambda/D.
-    padding : int, optional
-        Additional padding factor to ensure sufficient sampling (default is 5).
+        Longest observed baseline, in wavelengths.
+    eta : float, optional
+        Sampling factor (default is 5).
     """
+    N_float = eta * Q_max_lambda * (R_max_arcsec / rad_to_arcsec)
+    return int(cp.floor(N_float))
 
-    N_float = padding * Q_max_lambda * (R_max_arcsec / rad_to_arcsec)
-    
-    N_int = int(cp.floor(N_float))
-    
-    # Ensure N is even for symmetry.
-    if N_int % 2 != 0:
-        N_int += 1
-        
-    return N_int
 
 class DotLinearOperator(LinearOperator):
     def __init__(self, matrix, shape):

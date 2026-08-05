@@ -106,7 +106,8 @@ class Plot(object):
                    vmin = -10, vmax = -2,
                    phase_shift = True, deproject = False,
                    ax = None , label_size = 14, title_size = 20,
-                   tick_label_size = 13):
+                   tick_label_size = 13,
+                   save_dir = None):
         """
         Plot the visibility in the uv-plane.
         Parameters
@@ -136,6 +137,8 @@ class Plot(object):
             The size of the title. Default is 20.
         tick_label_size : int, optional
             The size of the tick labels. Default is 13.
+        save_dir : str, optional
+            The directory to save the plot. If None, the plot will not be saved. Default is None.
         """
     
         if zoom <= 0:
@@ -199,9 +202,12 @@ class Plot(object):
                labelsize=tick_label_size,
                length=5,
                width=2)
-        
+        ax.locator_params(axis='both', nbins=5)
         ax.set_aspect(1)
         ax.invert_yaxis()
+
+        if save_dir is not None:
+            plt.savefig(save_dir, dpi=300, bbox_inches='tight')
         
         if show_plot:
             plt.show()
@@ -212,7 +218,8 @@ class Plot(object):
                   vmin = 0, vmax = 4e10, gamma = 0.45,
                   phase_shift = True, deproject = False,
                   ax = None , label_size = 14, title_size = 20,
-                  tick_label_size = 13):
+                  tick_label_size = 13,
+                  save_dir = None):
         """
         Plot the intensity in the xy-plane.
         Parameters
@@ -241,6 +248,8 @@ class Plot(object):
             The size of the title. Default is 20.
         tick_label_size : int, optional
             The size of the tick labels. Default is 13.
+        save_dir : str, optional
+            The directory to save the plot. If None, the plot will not be saved. Default is None.
         """
         
         if zoom <= 0:
@@ -300,9 +309,12 @@ class Plot(object):
                labelsize=tick_label_size,
                length=5,
                width=2)
-        
+        ax.locator_params(axis='both', nbins=5)
         ax.set_aspect(1)
         ax.invert_yaxis()
+
+        if save_dir is not None:
+            plt.savefig(save_dir, dpi=300, bbox_inches='tight')
         
         if show_plot:
             plt.show()

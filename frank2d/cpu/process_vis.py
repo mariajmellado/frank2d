@@ -211,6 +211,10 @@ class Gridding(object):
             for y in range(ny):
                 x_sym = (-x) % nx
                 y_sym = (-y) % ny
+                #x_sym = 2*cx - x
+                #y_sym = 2*cy - y
+                #if not (0 <= x_sym < nx): x_sym = x
+                #if not (0 <= y_sym < ny): y_sym = y
 
                 v_xy = vis[y, x]
                 v_neg_xy = vis[y_sym, x_sym]

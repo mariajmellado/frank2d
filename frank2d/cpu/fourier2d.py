@@ -19,10 +19,12 @@ class FourierTransform2D(object):
         # Real space collocation points.
         self._x = np.linspace(-self._Xmax, self._Xmax, self._N, endpoint=False) # rad
         self._y = np.linspace(-self._Ymax, self._Ymax, self._N, endpoint=False) # rad
-        x_, y_ = np.meshgrid(self._x, self._y)
-        x_n, y_n = x_.reshape(-1), y_.reshape(-1) # x_n.shape = (N2,1)
         self._dx = 2*self._Xmax/self._N # rad.
         self._dy = 2*self._Ymax/self._N
+        #self._x = (np.arange(self._N) - self._N//2) * self._dx # rad
+        #self._y = (np.arange(self._N) - self._N//2) * self._dy # rad
+        x_, y_ = np.meshgrid(self._x, self._y)
+        x_n, y_n = x_.reshape(-1), y_.reshape(-1) # x_n.shape = (N2,1)
 
         self._Xn = x_n
         self._Yn = y_n

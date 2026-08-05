@@ -155,7 +155,7 @@ class MAPEstimator(object):
         # Fit with Frankenstein1D scheme.
         self.create_gaussian_model(data)
 
-        p0 = self._get_p0()
+        p0 = self._get_p0(initial_guess)
         self._p0 = p0
 
         self.set_minimizer()
@@ -173,13 +173,15 @@ class MAPEstimator(object):
         # Normalize the parameters.
         self._best = self.process_x_minimizer(x)
       
-    def _get_p0(self):
+    def _get_p0(self, initial_guess):
         """
         Get the minus log posterior for the initial guess.
         """
         GM = self._GM
-
-        params = {'m': 0, 'c': 10**(-2), 'l':10**4}
+        m = initial_guess['m']
+        l = initial_guess['l']
+        c = 10**(initial_guess['logpy'] - initial_guess['logpx']*m)
+        params = {'m': m, 'c': c, 'l': l}
         p0 = GM.minus_log_posterior(params)
         jDj0, logdetS0, logdetD0 = GM.jDj, GM.logdetS, GM.logdetD
 
