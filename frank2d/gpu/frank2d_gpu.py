@@ -21,7 +21,7 @@ This is the main module of the Frank2D package.
 """
 
 class Frank2D(object):
-    def __init__(self, N, Rmax, verbose = False):
+    def __init__(self, N, Rmax, verbose = False, dev_mode = False):
         """
         Initialize the Frank2D class.
         Parameters:
@@ -32,6 +32,8 @@ class Frank2D(object):
             Radius of the image in arcseconds.
         verbose : bool
             Whether to print verbose messages during the fitting process.
+        dev_mode : bool
+            Whether to run in development mode (for debugging purposes).
         """
         self._N =  N
         self._Nx = N
@@ -52,6 +54,7 @@ class Frank2D(object):
 
         self._verbose = verbose
         self.show = Logger(verbose = self._verbose)
+        self._dev_mode = dev_mode
 
         self.validate_grid_parameters(self._Rmax, self._N)
     
@@ -85,13 +88,6 @@ class Frank2D(object):
             N_recommended += 1
 
         is_valid = True
-
-        if N % 2 != 0:
-            msg = (f"Grid size N={N} is an odd number. A discrete grid with an odd N "
-                f"shifts the phase center (0,0) by a fraction of a pixel, introducing "
-                f"artificial phase gradients (diagonal aliasing) in the image plane. "
-                f"Please use an even integer (e.g., N={N+1}).")
-            self.show.warning(msg)
 
         # Nyquist theorem validation.
         if N < N_nyquist_min:
@@ -335,6 +331,8 @@ class Frank2D(object):
         None
         """
         if not self._set_gridded_data:
+            if not self._dev_mode:
+                self.check_bounds(data["u"], data["v"])
             grid = Gridding(self._Rmax, self._FT, verbose = verbose)
             try:
                 u = data["u"]
@@ -349,8 +347,6 @@ class Frank2D(object):
                 v = cp.asarray(v)
                 Vis = cp.asarray(Vis)
                 Weights = cp.asarray(Weights)
-            
-            self.check_bounds(u, v)
 
             u_gridded, v_gridded, vis_gridded, weights_gridded = grid.run(u, v, Vis, Weights,
                                                                           hermitian = hermitian)

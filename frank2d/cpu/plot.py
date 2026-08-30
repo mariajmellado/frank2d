@@ -121,8 +121,14 @@ class Plot(object):
             The size of the title. Default is 20.
         tick_label_size : int, optional
             The size of the tick labels. Default is 13.
+        nbins_ticks : int, optional
+            The number of bins for the ticks. Default is 5.
         save_dir : str, optional
             The directory to save the figure. If None, the figure will not be saved. Default is None.
+        xlims : tuple, optional
+            The limits for the x-axis. If None, it will be set automatically. Default is None.
+        ylims : tuple, optional
+            The limits for the y-axis. If None, it will be set automatically. Default is None.
         """
         if zoom <= 0:
             self.show.error("zoom must be > 0")
@@ -192,6 +198,7 @@ class Plot(object):
                labelsize=tick_label_size,
                length=5,
                width=2)
+    
         ax.locator_params(axis='both', nbins=nbins_ticks)
         ax.ticklabel_format(style='sci', axis='both', scilimits=(0, 0), useMathText=True)
         ax.set_aspect(1)
@@ -225,6 +232,10 @@ class Plot(object):
             The minimum value for the color scale. Default is 0.
         vmax : float, optional
             The maximum value for the color scale. Default is 4e10.
+        gamma : float, optional
+            The gamma value for the PowerNorm. Default is 0.45.
+        norm : matplotlib.colors.Normalize
+            The normalization for the color scale. If None, a PowerNorm will be used. Default is None.
         phase_shift : bool, optional
             Whether to apply the phase shift to the visibilities. Default is True.
         deproject : bool, optional
@@ -237,6 +248,8 @@ class Plot(object):
             The size of the title. Default is 20.
         tick_label_size : int, optional
             The size of the tick labels. Default is 13.
+        nbins_ticks : int, optional
+            The number of bins for the ticks. Default is 5.
         save_dir : str, optional
             The directory to save the figure. If None, the figure will not be saved. Default is None.
         """
@@ -276,7 +289,9 @@ class Plot(object):
 
         if norm is None:
             norm = colors.PowerNorm(gamma = gamma, vmin = vmin, vmax = vmax)
-
+        elif not isinstance(norm, colors.Normalize):
+            self.show.error("norm must be an instance of matplotlib.colors.Normalize")
+        
         mesh = ax.pcolormesh(x,
                              y,
                              self._intensity2d ,
@@ -844,7 +859,7 @@ class Plot(object):
     
     def power_spectrum(self, data, MAP_estimator = None, m = None, c = None,
                         fig_size = (7,2), title = "Power spectrum", title_size = 10,
-                        ylim_log = (-9, 0)):
+                        ylim_log = (-9, 0), xlim_log = (5, 6.5)):
         r"""
         Plot the power spectrum of the best parameters found in the posterior optimization.
         Params
@@ -916,7 +931,10 @@ class Plot(object):
         plt.legend(loc = 'best', fontsize = 'x-small')
         plt.title(title, size = title_size)
         plt.ylim(ylim_log)
-        plt.xlim(np.min(logx), np.max(logx))
+        if xlim_log is not None:
+            plt.xlim(xlim_log)
+        else:
+            plt.xlim(np.min(logx), np.max(logx))
         plt.show()
 
     def cg_tolerance(self, fig_size = (7,2)):

@@ -396,7 +396,7 @@ class IterativeSolverMethod():
         # save results
         self._fit_data['tols'] = self._tols
         self._fit_info['CGM_converged'] = (info == 0)
-        self._fit_info['Fit_correctly'] = self.fit_correctly(fit_value)
+        self._fit_info['Fit_correctly'] = fit_value
 
         info = pprint.pformat(self._fit_info, indent = 15)[1:][:-1]
         self.show.info(f"        +  Fit info: \n" + info)

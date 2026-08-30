@@ -78,7 +78,7 @@ def get_optimal_N_fft(R_max_arcsec, Q_max_lambda, eta=5, factors=(2, 3, 5)):
     factors : tuple of int, optional
         Allowed prime factors (default is (2, 3, 5)).
     """
-    N_min = int(np.floor(eta * Q_max_lambda * (R_max_arcsec / rad_to_arcsec)))
+    N_min = get_optimal_N(R_max_arcsec, Q_max_lambda, eta)
     return next_fft_friendly(N_min, factors)
 
 def linear_operator(matrix, size):

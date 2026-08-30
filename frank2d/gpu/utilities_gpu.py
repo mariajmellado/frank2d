@@ -28,6 +28,57 @@ def get_optimal_N(R_max_arcsec, Q_max_lambda, eta=5):
     N_float = eta * Q_max_lambda * (R_max_arcsec / rad_to_arcsec)
     return int(cp.floor(N_float))
 
+def next_fft_friendly(n, factors=(2, 3, 5)):
+    """
+    Smallest integer >= n whose prime factorisation contains only the given
+    factors (5-smooth by default). These are the sizes for which the FFT can
+    use its specialised radix routines all the way down.
+
+    Parameters
+    ----------
+    n : int
+        Lower bound on the grid size.
+    factors : tuple of int, optional
+        Allowed prime factors (default is (2, 3, 5)).
+    """
+    if n <= 1:
+        return 1
+    limit = n * max(factors)
+    best = None
+    a = 1
+    while a < limit:
+        b = a
+        while b < limit:
+            c = b
+            while c < limit:
+                if c >= n and (best is None or c < best):
+                    best = c
+                c *= factors[2]
+            b *= factors[1]
+        a *= factors[0]
+    return best
+
+
+def get_optimal_N_fft(R_max_arcsec, Q_max_lambda, eta=5, factors=(2, 3, 5)):
+    """
+    Same lower bound as get_optimal_N, then rounded up to the nearest
+    FFT-friendly size. The cost of the FFT is governed by the prime
+    factorisation of N rather than by N alone, so a slightly larger grid built
+    from small factors is usually cheaper than the exact minimum.
+
+    Parameters
+    ----------
+    R_max_arcsec : float
+        Maximum radius of the image grid, in arcseconds.
+    Q_max_lambda : float
+        Longest observed baseline, in wavelengths.
+    eta : float, optional
+        Sampling factor (default is 5).
+    factors : tuple of int, optional
+        Allowed prime factors (default is (2, 3, 5)).
+    """
+    N_min = get_optimal_N(R_max_arcsec, Q_max_lambda, eta)
+    return next_fft_friendly(N_min, factors)
 
 class DotLinearOperator(LinearOperator):
     def __init__(self, matrix, shape):
