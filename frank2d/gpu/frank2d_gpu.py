@@ -381,7 +381,7 @@ class Frank2D(object):
         return V_full
 
     def search_MAP(self, data = None,
-                   initial_guess = {'m': -2, 'l':1e4, 'logpx': 5, 'logpy': -1},
+                   initial_guess = {'m': -2, 'l':1e4, 'logq': 5, 'logp': -1},
                    N_opt = 50, verbose = False):
         """
         Search for the Maximum A Posteriori (MAP) parameters.
@@ -402,11 +402,11 @@ class Frank2D(object):
                 Power-law index for the power spectrum of the visibilities.
             l : float
                 Length scale for the kernel in lambda.
-            logpx : float, lambda
+            logq : float, lambda
                 Logarithm of certain spatial baseline in lambda.
-            logpy : float, lambda
-                Logarithm of the power spectrum value associated to logpx.
-                From this values we obtain c solving logpy = m*logpx + c,
+            logp : float, lambda
+                Logarithm of the power spectrum value associated to logq.
+                From this values we obtain c solving logp = m*logq + c,
                 where (m, c, l) are the parameters of the kernel for the GP.
         N_opt : int
             Number of collocation points for the optimization.
@@ -437,7 +437,7 @@ class Frank2D(object):
 
     def fit(self, 
             data = None,
-            find_MAP = False, initial_guess = {'m': -2, 'l': 1e4, 'logpx': 5, 'logpy': -2 },
+            find_MAP = False, initial_guess = {'m': -2, 'l': 1e4, 'logq': 5, 'logp': -2 },
             kernel_type = 'wend', kernel_params = {'m': -2, 'c': 1e8, 'l': 5e4},
             method_name = 'bicgstab', method_func = None,
             x0 = None, maxiter = 50000, rtol = 1e-8, precond_type = 'jacobi',
@@ -465,11 +465,11 @@ class Frank2D(object):
                 Power-law index for the power spectrum of the visibilities.
             l : float
                 Length scale for the kernel in lambda.
-            logpx : float, lambda
+            logq : float, lambda
                 Logarithm of certain spatial baseline in lambda.
-            logpy : float, lambda
-                Logarithm of the power spectrum value associated to logpx.
-                From this values we obtain c solving logpy = m*logpx + c,
+            logp : float, lambda
+                Logarithm of the power spectrum value associated to logq.
+                From this values we obtain c solving logp = m*logq + c,
                 where (m, c, l) are the parameters of the kernel for the GP.
         kernel_type : str
             Type of kernel to use ('sqexp' or 'wend').
