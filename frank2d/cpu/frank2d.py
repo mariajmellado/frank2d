@@ -91,7 +91,7 @@ class Frank2D(object):
         # Nyquist theorem validation.
         if N < N_nyquist_min:
             msg = (f"Grid size N={N} is strictly below the Nyquist limit (minimum N={N_nyquist_min}) "
-                f"for R_max={R_max_arcsec}\" and Q_max={Q_max_lambda:.2e} lambda. "
+                f"for R_max={R_max*rad_to_arcsec}\" and Q_max={Q_max:.2e} lambda. "
                 f"High-frequency visibilities will be clipped and lost. "
                 f"The recommended N is {N_recommended} or higher.")
             self.show.error(msg)
@@ -146,7 +146,6 @@ class Frank2D(object):
                                 " Or if you'd like to fit to shorter maximum baseline,"
                                 " cut the (u, v) distribution before fitting"
                                 " ".format(Qmax_grid, Qmax_data))
-
 
     def set_kernel( self, kernel_type = 'wend', 
                     kernel_params = {'m': -2, 'c': 1e8, 'l': 5e4}
@@ -328,9 +327,6 @@ class Frank2D(object):
         None
         """
         if not self._set_gridded_data:
-            if not self._dev_mode:
-                self.check_bounds(data["u"], data["v"])
-            grid = Gridding(self._Rmax, self._FT, verbose = verbose)
             try:
                 u = data["u"]
                 v = data["v"]
@@ -338,6 +334,12 @@ class Frank2D(object):
                 Weights = data["weights"]
             except KeyError:
                 self.show.error("data dictionary must contain 'u', 'v', 'vis' and 'weights' keys.")
+            
+            if not self._dev_mode:
+                self.check_bounds(u, v)
+
+            grid = Gridding(self._Rmax, self._FT, verbose = verbose)
+
             u_gridded, v_gridded, vis_gridded, weights_gridded = grid.run(u, v, Vis, Weights,
                                                                           hermitian = hermitian)
                                                                 
@@ -483,17 +485,10 @@ class Frank2D(object):
             Whether to run the fit from scratch (resetting all previous settings),
             i.e., running from after gridding.
         """
-        if not self._set_gridded_data or data is not None:
-            if not data:
-                self.show.error("If gridded data is not set, u, v, Vis and Weights must be provided.")
-            try:
-                u = data["u"]
-                v = data["v"]
-                Vis = data["vis"]
-                Weights = data["weights"]
-            except KeyError:
-                self.show.error("data dictionary must contain 'u', 'v', 'vis' and 'weights' keys.")
-            self.process_vis(data, hermitian = hermitian, verbose = self._verbose)
+        if not data:
+            self.show.error("If gridded data is not set, u, v, Vis and Weights must be provided.")
+
+        self.process_vis(data, hermitian = hermitian, verbose = self._verbose)
 
         if run_from_scratch:
             self._set_x0 = False

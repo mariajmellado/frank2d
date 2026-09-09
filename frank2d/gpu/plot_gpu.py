@@ -201,7 +201,7 @@ class Plot(object):
         cmap.set_label(r'log$\|V\|$ [Jy]', size=label_size)
         cmap.ax.tick_params(labelsize=tick_label_size)
 
-         if xlims is not None:
+        if xlims is not None:
             ax.set_xlim(xlims)
         else:
             ax.set_xlim(u.max()/zoom, u.min()/zoom)

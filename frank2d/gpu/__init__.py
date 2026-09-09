@@ -1,7 +1,7 @@
 from ..constants import rad_to_arcsec, deg_to_rad
 from ..geometry import Geometry
 
-from .utilities_gpu import get_optimal_N
+from .utilities_gpu import get_optimal_N, linear_operator
 from .fourier2d_gpu import FourierTransform2D
 from .process_vis_gpu import Gridding
 from .frank2d_gpu import Frank2D
@@ -12,7 +12,9 @@ from .posterior_optimization_gpu import MAPEstimator
 
 __all__ = [
     "Frank2D",
+    "SquaredExponential",
     "Wendland",
+    "linear_operator",
     "Plot",
     "Gridding",
     "IterativeSolverMethod",
@@ -20,7 +22,6 @@ __all__ = [
     "MAPEstimator",
     "rad_to_arcsec",
     "deg_to_rad",
-    "SquaredExponential",
     "get_optimal_N",
     "Geometry"
 ]

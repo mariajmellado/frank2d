@@ -80,6 +80,25 @@ def get_optimal_N_fft(R_max_arcsec, Q_max_lambda, eta=5, factors=(2, 3, 5)):
     N_min = get_optimal_N(R_max_arcsec, Q_max_lambda, eta)
     return next_fft_friendly(N_min, factors)
 
+def linear_operator(matrix, size):
+    """
+    Function to create a linear operator from a given matrix.
+    Parameters
+    ----------
+    matrix : 2D array
+        The matrix to be converted into a linear operator.
+    size : tuple[int, int]
+        The shape of the linear operator (rows, columns).
+    Returns
+    -------
+    LinearOperator
+        A linear operator that performs matrix-vector multiplication.
+    """
+    def matvec(x):
+        return matrix.dot(x)
+
+    return LinearOperator(size, matvec=matvec)
+
 class DotLinearOperator(LinearOperator):
     def __init__(self, matrix, shape):
         """

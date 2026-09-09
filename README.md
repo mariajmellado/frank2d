@@ -75,3 +75,8 @@ Run the full suite (Scripts + Notebooks):
 ```bash
 pytest --nbmake Testing/ -v
 ```
+
+Run one file test
+```bash
+python -m pytest Testing/test_file_name.py -v
+```
