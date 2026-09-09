@@ -21,7 +21,7 @@ This is the main module of the Frank2D package.
 """
 
 class Frank2D(object):
-    def __init__(self, N, Rmax, verbose = False):
+    def __init__(self, N, Rmax, verbose = False, dev_mode = False):
         """
         Initialize the Frank2D class.
         Parameters:
@@ -32,6 +32,8 @@ class Frank2D(object):
             Radius of the image in arcseconds.
         verbose : bool
             Whether to print verbose messages during the fitting process.
+        dev_mode : bool
+            Whether to run in development mode (for debugging purposes).
         """
         self._N =  N
         self._Nx = N
@@ -52,6 +54,7 @@ class Frank2D(object):
 
         self._verbose = verbose
         self.show = Logger(verbose = self._verbose)
+        self._dev_mode = dev_mode
 
         self.validate_grid_parameters(self._Rmax, self._N)
     
@@ -86,17 +89,10 @@ class Frank2D(object):
 
         is_valid = True
 
-        if N % 2 != 0:
-            msg = (f"Grid size N={N} is an odd number. A discrete grid with an odd N "
-                f"shifts the phase center (0,0) by a fraction of a pixel, introducing "
-                f"artificial phase gradients (diagonal aliasing) in the image plane. "
-                f"Please use an even integer (e.g., N={N+1}).")
-            self.show.warning(msg)
-
         # Nyquist theorem validation.
         if N < N_nyquist_min:
             msg = (f"Grid size N={N} is strictly below the Nyquist limit (minimum N={N_nyquist_min}) "
-                f"for R_max={R_max_arcsec}\" and Q_max={Q_max_lambda:.2e} lambda. "
+                f"for R_max={R_max*rad_to_arcsec}\" and Q_max={Q_max:.2e} lambda. "
                 f"High-frequency visibilities will be clipped and lost. "
                 f"The recommended N is {N_recommended} or higher.")
             self.show.error(msg)
@@ -107,7 +103,6 @@ class Frank2D(object):
                 f"To avoid potential ringing or truncation artifacts at the grid boundaries, "
                 f"a factor of 5 is recommended (N >= {N_recommended}).")
             self.show.warning(msg)
-
 
     def check_bounds(self, u, v):
             """
@@ -152,8 +147,6 @@ class Frank2D(object):
                                 " Or if you'd like to fit to shorter maximum baseline,"
                                 " cut the (u, v) distribution before fitting"
                                 " ".format(Qmax_grid, Qmax_data))
-
-
 
     def set_kernel( self, kernel_type = 'wend', 
                     kernel_params = {'m': -2, 'c': 1e8, 'l': 5e4}
@@ -335,27 +328,27 @@ class Frank2D(object):
         None
         """
         if not self._set_gridded_data:
-            grid = Gridding(self._Rmax, self._FT, verbose = verbose)
-            try:
-                u = data["u"]
-                v = data["v"]
-                Vis = data["vis"]
-                Weights = data["weights"]
-            except KeyError:
-                self.show.error("data dictionary must contain 'u', 'v', 'vis' and 'weights' keys.")
-            # corroborate that they are cupy arrays.
-            if not isinstance(u, cp.ndarray):
-                u = cp.asarray(u)
-                v = cp.asarray(v)
-                Vis = cp.asarray(Vis)
-                Weights = cp.asarray(Weights)
-            
-            self.check_bounds(u, v)
+            if data is None:
+                self.show.error("Gridded data is not set, u, v, Vis and Weights must be provided.")
+            else:
+                self.show.info("===>  Gridding visibility data...")
+                try:
+                    u = cp.asarray(data["u"])
+                    v = cp.asarray(data["v"])
+                    Vis = cp.asarray(data["vis"])
+                    Weights = cp.asarray(data["weights"])
+                except KeyError:
+                    self.show.error("data dictionary must contain 'u', 'v', 'vis' and 'weights' keys.")
+                # corroborate that they are cupy arrays.
+    
+                if not self._dev_mode:
+                    self.check_bounds(u, v)
 
-            u_gridded, v_gridded, vis_gridded, weights_gridded = grid.run(u, v, Vis, Weights,
-                                                                          hermitian = hermitian)
-            # grid.run may return numpy arrays; convert to cupy
-            self.set_gridded_data(u_gridded, v_gridded, vis_gridded, weights_gridded)
+                grid = Gridding(self._Rmax, self._FT, verbose = verbose)
+                u_gridded, v_gridded, vis_gridded, weights_gridded = grid.run(u, v, Vis, Weights,
+                                                                            hermitian = hermitian)
+                # grid.run may return numpy arrays; convert to cupy
+                self.set_gridded_data(u_gridded, v_gridded, vis_gridded, weights_gridded)
         else:
             self.show.info("Using existing gridded data...")
         
@@ -385,7 +378,7 @@ class Frank2D(object):
         return V_full
 
     def search_MAP(self, data = None,
-                   initial_guess = {'m': -2, 'l':1e4, 'logpx': 5, 'logpy': -1},
+                   initial_guess = {'m': -2, 'l':1e4, 'logq': 5, 'logp': -1},
                    N_opt = 50, verbose = False):
         """
         Search for the Maximum A Posteriori (MAP) parameters.
@@ -406,11 +399,11 @@ class Frank2D(object):
                 Power-law index for the power spectrum of the visibilities.
             l : float
                 Length scale for the kernel in lambda.
-            logpx : float, lambda
+            logq : float, lambda
                 Logarithm of certain spatial baseline in lambda.
-            logpy : float, lambda
-                Logarithm of the power spectrum value associated to logpx.
-                From this values we obtain c solving logpy = m*logpx + c,
+            logp : float, lambda
+                Logarithm of the power spectrum value associated to logq.
+                From this values we obtain c solving logp = m*logq + c,
                 where (m, c, l) are the parameters of the kernel for the GP.
         N_opt : int
             Number of collocation points for the optimization.
@@ -441,7 +434,7 @@ class Frank2D(object):
 
     def fit(self, 
             data = None,
-            find_MAP = False, initial_guess = {'m': -2, 'l': 1e4, 'logpx': 5, 'logpy': -2 },
+            find_MAP = False, initial_guess = {'m': -2, 'l': 1e4, 'logq': 5, 'logp': -2 },
             kernel_type = 'wend', kernel_params = {'m': -2, 'c': 1e8, 'l': 5e4},
             method_name = 'bicgstab', method_func = None,
             x0 = None, maxiter = 50000, rtol = 1e-8, precond_type = 'jacobi',
@@ -469,11 +462,11 @@ class Frank2D(object):
                 Power-law index for the power spectrum of the visibilities.
             l : float
                 Length scale for the kernel in lambda.
-            logpx : float, lambda
+            logq : float, lambda
                 Logarithm of certain spatial baseline in lambda.
-            logpy : float, lambda
-                Logarithm of the power spectrum value associated to logpx.
-                From this values we obtain c solving logpy = m*logpx + c,
+            logp : float, lambda
+                Logarithm of the power spectrum value associated to logq.
+                From this values we obtain c solving logp = m*logq + c,
                 where (m, c, l) are the parameters of the kernel for the GP.
         kernel_type : str
             Type of kernel to use ('sqexp' or 'wend').
@@ -497,25 +490,8 @@ class Frank2D(object):
             Whether to run the fit from scratch (resetting all previous settings),
             i.e., running from after gridding.
         """
-
-        if not self._set_gridded_data or data is not None:
-            if not data:
-                self.show.error("If gridded data is not set, u, v, Vis and Weights must be provided.")
-            try:
-                u = data["u"]
-                v = data["v"]
-                Vis = data["vis"]
-                Weights = data["weights"]
-            except KeyError:
-                self.show.error("data dictionary must contain 'u', 'v', 'vis' and 'weights' keys.")
-
-            # Corroborate that they are CuPy arrays.
-            if not isinstance(u, cp.ndarray):
-                u = cp.asarray(u)
-                v = cp.asarray(v)
-                Vis = cp.asarray(Vis)
-                Weights = cp.asarray(Weights)
-            self.process_vis(data, hermitian = hermitian, verbose = self._verbose)
+        
+        self.process_vis(data, hermitian = hermitian, verbose = self._verbose)
 
         if run_from_scratch:
             self._set_x0 = False

@@ -68,26 +68,26 @@ class MAPEstimator(object):
     def process_initial_guess(self, initial_guess):
         """
         Process the initial guess for the parameters.
-        Is assumed that  logc = logpy - logpx*m.
+        Is assumed that  logc = logp - logq*m.
         Params
         ------
         initial_guess : dict, optional
             Initial guess for the parameters m, c and l.
-            Must contain the keys 'm', 'logpx', 'logpy' and 'l'.
+            Must contain the keys 'm', 'logq', 'logp' and 'l'.
         """
         self.show.info("===> Setting the initial guess...")
         params = {}
-        if 'logpx' not in initial_guess:
-            self.show.error("Initial guess must contain 'logpx' parameter.")
-        if 'logpy' not in initial_guess:
-            self.show.error("Initial guess must contain 'logpy' parameter.")
+        if 'logq' not in initial_guess:
+            self.show.error("Initial guess must contain 'logq' parameter.")
+        if 'logp' not in initial_guess:
+            self.show.error("Initial guess must contain 'logp' parameter.")
         if 'm' not in initial_guess:
             self.show.error("Initial guess must contain 'm' parameter.")
         if 'l' not in initial_guess:
             self.show.error("Initial guess must contain 'l' parameter.")
 
-        self._logpx = float(initial_guess['logpx'])
-        params['logp'] = float(initial_guess['logpy'])
+        self._logq = float(initial_guess['logq'])
+        params['logp'] = float(initial_guess['logp'])
         params['m'] = float(initial_guess['m'])
         params['l'] = float(initial_guess['l'])
 
@@ -129,16 +129,16 @@ class MAPEstimator(object):
         params = { key: x[i] for i, key in enumerate(self._params_order) }
         m = params['m']
         l = params['l']
-        logpx  = self._logpx
+        logq  = self._logq
         logp  = params['logp']
-        logc = logp - logpx*m
+        logc = logp - logq*m
         c = 10**logc
 
         self.show.info("        +  m = {:.2f}, c = {:.2e}, l = {:.2e}".format(m, c, l))
         return {'m': m, 'c': c, 'l': l}
 
     def optimize(self, data,
-                       initial_guess = {"m": -2, "l": 1e4,  "logpx": 5, "logpy": -2}):
+                       initial_guess = {"m": -2, "l": 1e4,  "logq": 5, "logp": -2}):
         """
         Optimize the posterior to find the MAP estimate of the parameters.
         Params
@@ -147,7 +147,7 @@ class MAPEstimator(object):
             Dictionary containing the data to fit. Must contain the keys 'u', 'v', 'vis', and 'weights'.
         initial_guess : dict, optional
             Initial guess for the parameters m, c and l.
-            Must contain the keys 'm', 'logpx', 'logpy' and 'l'.
+            Must contain the keys 'm', 'logq', 'logp' and 'l'.
         """
 
         self.set_initial_guess(initial_guess)
@@ -155,7 +155,7 @@ class MAPEstimator(object):
         # Fit with Frankenstein1D scheme.
         self.create_gaussian_model(data)
 
-        p0 = self._get_p0()
+        p0 = self._get_p0(initial_guess)
         self._p0 = p0
 
         self.set_minimizer()
@@ -173,13 +173,15 @@ class MAPEstimator(object):
         # Normalize the parameters.
         self._best = self.process_x_minimizer(x)
       
-    def _get_p0(self):
+    def _get_p0(self, initial_guess):
         """
         Get the minus log posterior for the initial guess.
         """
         GM = self._GM
-
-        params = {'m': 0, 'c': 10**(-2), 'l':10**4}
+        m = initial_guess['m']
+        l = initial_guess['l']
+        c = 10**(initial_guess['logp'] - initial_guess['logq']*m)
+        params = {'m': m, 'c': c, 'l': l}
         p0 = GM.minus_log_posterior(params)
         jDj0, logdetS0, logdetD0 = GM.jDj, GM.logdetS, GM.logdetD
 

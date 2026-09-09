@@ -106,7 +106,8 @@ class Plot(object):
                    vmin = -10, vmax = -2,
                    phase_shift = True, deproject = False,
                    ax = None , label_size = 14, title_size = 20,
-                   tick_label_size = 13):
+                   tick_label_size = 13, nbins_ticks = 5,
+                   save_dir = None, xlims = None, ylims = None):
         """
         Plot the visibility in the uv-plane.
         Parameters
@@ -121,9 +122,9 @@ class Plot(object):
          zoom : float, optional
             The zoom factor for the plot. Default is 1.
         vmin : float, optional
-            The minimum value for the color scale. Default is -10.
+            The minimum value for the color scale in logarithmic scale. Default is -10.
         vmax : float, optional
-            The maximum value for the color scale. Default is -2.
+            The maximum value for the color scale in logarithmic scale. Default is -2.
         phase_shift : bool, optional
             Whether to apply the phase shift to the visibilities. Default is True.
         deproject : bool, optional
@@ -136,6 +137,14 @@ class Plot(object):
             The size of the title. Default is 20.
         tick_label_size : int, optional
             The size of the tick labels. Default is 13.
+        nbins_ticks : int, optional
+            The number of bins for the ticks. Default is 5.
+        save_dir : str, optional
+            The directory to save the plot. If None, the plot will not be saved. Default is None.
+        xlims : tuple, optional
+            The limits for the x-axis. If None, the limits will be set automatically. Default is None.
+        ylims : tuple, optional
+            The limits for the y-axis. If None, the limits will be set automatically. Default is None.
         """
     
         if zoom <= 0:
@@ -180,7 +189,9 @@ class Plot(object):
                             v,
                             np.log(np.abs(self._visibility2d)),
                             cmap="magma",
-                            vmin=vmin, vmax=vmax)
+                            vmin=vmin, vmax=vmax,
+                            rasterized=True,
+                            shading='auto')
         
         ax.set_xlabel(r'u [$\lambda$]', size=label_size)
         ax.set_ylabel(r'v [$\lambda$]', size=label_size)
@@ -190,18 +201,28 @@ class Plot(object):
         cmap.set_label(r'log$\|V\|$ [Jy]', size=label_size)
         cmap.ax.tick_params(labelsize=tick_label_size)
 
-        
-        ax.set_xlim(u.max()/zoom, u.min()/zoom)
-        ax.set_ylim(v.max()/zoom, v.min()/zoom)
+        if xlims is not None:
+            ax.set_xlim(xlims)
+        else:
+            ax.set_xlim(u.max()/zoom, u.min()/zoom)
+        if ylims is not None:
+            ax.set_ylim(ylims)
+        else:
+            ax.set_ylim(v.max()/zoom, v.min()/zoom)
 
         ax.tick_params(axis='both',
-               which='major',
+               which='both',
                labelsize=tick_label_size,
                length=5,
                width=2)
-        
+
+        ax.locator_params(axis='both', nbins=nbins_ticks)
+        ax.ticklabel_format(style='sci', axis='both', scilimits=(0, 0), useMathText=True)
         ax.set_aspect(1)
         ax.invert_yaxis()
+
+        if save_dir is not None:
+            plt.savefig(save_dir, dpi=300, bbox_inches='tight')
         
         if show_plot:
             plt.show()
@@ -209,10 +230,11 @@ class Plot(object):
     def intensity(self,
                   title= r'$I_{model}^{F2D}$',
                   fig_size = 6, zoom = 1,
-                  vmin = 0, vmax = 4e10, gamma = 0.45,
+                  vmin = 0, vmax = 4e10, gamma = 0.45, norm = None,
                   phase_shift = True, deproject = False,
                   ax = None , label_size = 14, title_size = 20,
-                  tick_label_size = 13):
+                  tick_label_size = 13, nbins_ticks = 5,
+                  save_dir = None):
         """
         Plot the intensity in the xy-plane.
         Parameters
@@ -229,6 +251,8 @@ class Plot(object):
             The maximum value for the color scale. Default is 4e10.
         gamma : float, optional
             The gamma value for the power normalization. Default is 0.45.
+        norm : matplotlib.colors.Normalize
+            The normalization for the color scale. If None, a PowerNorm will be used. Default is None.
         phase_shift : bool, optional
             Whether to apply the phase shift to the visibilities. Default is True.
         deproject : bool, optional
@@ -241,6 +265,10 @@ class Plot(object):
             The size of the title. Default is 20.
         tick_label_size : int, optional
             The size of the tick labels. Default is 13.
+        nbins_ticks : int, optional
+            The number of bins for the ticks. Default is 5.
+        save_dir : str, optional
+            The directory to save the plot. If None, the plot will not be saved. Default is None.
         """
         
         if zoom <= 0:
@@ -276,13 +304,18 @@ class Plot(object):
         else:
             show_plot = False
         
-        norm = colors.PowerNorm(gamma = gamma, vmin = vmin, vmax = vmax)
+        if norm is None:
+            norm = colors.PowerNorm(gamma = gamma, vmin = vmin, vmax = vmax)
+        elif not isinstance(norm, colors.Normalize):
+            self.show.error("norm must be None or an instance of matplotlib.colors.Normalize")
 
         mesh = ax.pcolormesh(x,
                              y,
                              self._intensity2d ,
                              cmap="magma",
-                             norm=norm)
+                             norm=norm,
+                             rasterized=True,
+                             shading='auto')
             
         ax.set_xlabel(r'RA ["]', size=label_size)
         ax.set_ylabel(r'Dec ["]', size=label_size)
@@ -300,9 +333,13 @@ class Plot(object):
                labelsize=tick_label_size,
                length=5,
                width=2)
-        
+
+        ax.locator_params(axis='both', nbins=5)
         ax.set_aspect(1)
         ax.invert_yaxis()
+
+        if save_dir is not None:
+            plt.savefig(save_dir, dpi=300, bbox_inches='tight')
         
         if show_plot:
             plt.show()
@@ -842,7 +879,8 @@ class Plot(object):
         plt.show()
     
     def power_spectrum(self, data, MAP_estimator = None, m = None, c = None,
-                        fig_size = (7,2), title = "Power spectrum", title_size = 10):
+                        fig_size = (7,2), title = "Power spectrum", title_size = 10,
+                        ylim_log = (-9, 0), xlim_log = (5, 6.5)):
         r"""
         Plot the power spectrum of the best parameters found in the posterior optimization.
         Params
@@ -913,7 +951,11 @@ class Plot(object):
         plt.ylabel(r'log $|Vis_{Obs}|^{2}$ [Jy]', size = 10)
         plt.legend(loc = 'best', fontsize = 'x-small')
         plt.title(title, size = title_size)
-        plt.ylim(-9, 0)
+        plt.ylim(ylim_log)
+        if xlim_log is not None:
+            plt.xlim(xlim_log)
+        else:
+            plt.xlim(logx.min(), logx.max())
         plt.xlim(5, 6.5)
         plt.show()
 

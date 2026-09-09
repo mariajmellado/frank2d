@@ -17,12 +17,12 @@ class FourierTransform2D(object):
         self._N2 = self.size = self._N * self._N  # Number of points we want to use in the 2D-DFT.
 
         # Real space collocation points.
-        self._x = cp.linspace(-self._Xmax, self._Xmax, self._N, endpoint=False)  # rad
-        self._y = cp.linspace(-self._Ymax, self._Ymax, self._N, endpoint=False)  # rad
+        self._dx = 2*self._Xmax/self._N # rad.
+        self._dy = 2*self._Ymax/self._N
+        self._x = (cp.arange(self._N) - self._N//2) * self._dx # rad
+        self._y = (cp.arange(self._N) - self._N//2) * self._dy # rad
         x_, y_ = cp.meshgrid(self._x, self._y)
         x_n, y_n = x_.reshape(-1), y_.reshape(-1)  # x_n.shape = (N2,1)
-        self._dx = 2 * self._Xmax / self._N  # rad.
-        self._dy = 2 * self._Ymax / self._N
 
         self._Xn = x_n
         self._Yn = y_n

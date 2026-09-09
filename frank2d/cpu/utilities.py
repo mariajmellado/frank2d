@@ -7,32 +7,79 @@ import numpy as np
 This module provides utility functions for Frank2D package.
 """
 
-def get_optimal_N(R_max_arcsec, Q_max_lambda, padding=5):
+def get_optimal_N(R_max_arcsec, Q_max_lambda, eta=5):
     """
-    Calculate the optimal number of pixels (N) for the Frank2D algorithm
-    based on the maximum radius (R_max) and maximum spatial frequency (Q_max).
+    Calculate the minimum number of collocation points (N) for the Frank2D
+    algorithm, based on the maximum radius (R_max) and the longest observed
+    baseline (Q_max).
 
-    N must be large enough to capture the spatial frequencies up to Q_max, 
-    and even to ensure symmetry in the Fourier transform (including the zero frequency).
+    The sampling factor eta sets how far the Fourier grid extends past Q_max;
+    the default of 5 places its outer edge roughly 25% beyond the longest
+    observed baseline.
+
     Parameters
     ----------
     R_max_arcsec : float
-        Maximum radius in arcseconds.
+        Maximum radius of the image grid, in arcseconds.
     Q_max_lambda : float
-        Maximum spatial frequency in units of lambda/D.
-    padding : int, optional
-        Additional padding factor to ensure sufficient sampling (default is 5).
+        Longest observed baseline, in wavelengths.
+    eta : float, optional
+        Sampling factor (default is 5).
     """
+    N_float = eta * Q_max_lambda * (R_max_arcsec / rad_to_arcsec)
+    return int(np.floor(N_float))
 
-    N_float = padding * Q_max_lambda * (R_max_arcsec / rad_to_arcsec)
-    
-    N_int = int(np.floor(N_float))
-    
-    # Ensure N is even for symmetry.
-    if N_int % 2 != 0:
-        N_int += 1
-        
-    return N_int
+def next_fft_friendly(n, factors=(2, 3, 5)):
+    """
+    Smallest integer >= n whose prime factorisation contains only the given
+    factors (5-smooth by default). These are the sizes for which the FFT can
+    use its specialised radix routines all the way down.
+
+    Parameters
+    ----------
+    n : int
+        Lower bound on the grid size.
+    factors : tuple of int, optional
+        Allowed prime factors (default is (2, 3, 5)).
+    """
+    if n <= 1:
+        return 1
+    limit = n * max(factors)
+    best = None
+    a = 1
+    while a < limit:
+        b = a
+        while b < limit:
+            c = b
+            while c < limit:
+                if c >= n and (best is None or c < best):
+                    best = c
+                c *= factors[2]
+            b *= factors[1]
+        a *= factors[0]
+    return best
+
+
+def get_optimal_N_fft(R_max_arcsec, Q_max_lambda, eta=5, factors=(2, 3, 5)):
+    """
+    Same lower bound as get_optimal_N, then rounded up to the nearest
+    FFT-friendly size. The cost of the FFT is governed by the prime
+    factorisation of N rather than by N alone, so a slightly larger grid built
+    from small factors is usually cheaper than the exact minimum.
+
+    Parameters
+    ----------
+    R_max_arcsec : float
+        Maximum radius of the image grid, in arcseconds.
+    Q_max_lambda : float
+        Longest observed baseline, in wavelengths.
+    eta : float, optional
+        Sampling factor (default is 5).
+    factors : tuple of int, optional
+        Allowed prime factors (default is (2, 3, 5)).
+    """
+    N_min = get_optimal_N(R_max_arcsec, Q_max_lambda, eta)
+    return next_fft_friendly(N_min, factors)
 
 def linear_operator(matrix, size):
     """

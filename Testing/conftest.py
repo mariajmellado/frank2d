@@ -3,22 +3,72 @@ import numpy as np
 from scipy.interpolate import RectBivariateSpline
 
 from frank2d import FourierTransform2D, rad_to_arcsec
-import matplotlib.pyplot as plt
+from frank2d.cpu import FourierTransform2D
 
 @pytest.hookimpl(trylast=True)
 def pytest_terminal_summary(terminalreporter, exitstatus, config):
     """
-    Hook to announce the successful completion of all atomic tests.
-    This will only print if the exit status is 0 (all tests passed).
+    Print a clear end-of-run banner.
+
+    `terminalreporter` is injected by pytest into this hook; its `.stats` dict
+    holds the test reports grouped by outcome.
     """
-    if exitstatus == 0:
-        print("\n" + "="*50)
-        print("🚀 FRANK2D: ALL ATOMIC TESTS PASSED SUCCESSFULLY!")
-        print("="*50 + "\n")
+    passed = len(terminalreporter.stats.get("passed", []))
+    failed = len(terminalreporter.stats.get("failed", []))
+    errors = len(terminalreporter.stats.get("error", []))
+    skipped = len(terminalreporter.stats.get("skipped", []))
+
+    print("\n" + "=" * 60)
+    if failed or errors:
+        print(f"❌ FRANK2D: {failed + errors} FAILED, {passed} passed, {skipped} skipped")
+    elif skipped:
+        print(f"❗️ FRANK2D: {passed} passed, but {skipped} SKIPPED "
+              f"(run with -ra to see why)")
     else:
-        print("\n" + "!"*50)
-        print("❌ SOME TESTS FAILED.")
-        print("!"*50 + "\n")
+        print(f"🚀 FRANK2D: ALL {passed} TESTS PASSED SUCCESSFULLY!")
+    print("=" * 60 + "\n")
+
+
+# =============================================================================
+# GPU AVAILABILITY  (single source of truth for the whole suite)
+# =============================================================================
+try:
+    import cupy as _cp
+    HAS_GPU = _cp.cuda.runtime.getDeviceCount() > 0
+except Exception:
+    HAS_GPU = False
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "gpu: test needs a CUDA device")
+    config.addinivalue_line("markers", "slow: long-running test")
+
+
+def pytest_collection_modifyitems(config, items):
+    skip_gpu = pytest.mark.skip(reason="no CUDA device available")
+    for item in items:
+        if "gpu" in item.keywords and not HAS_GPU:
+            item.add_marker(skip_gpu)
+
+
+@pytest.fixture
+def has_gpu():
+    """True when a CUDA device is available."""
+    return HAS_GPU
+
+
+@pytest.fixture(autouse=True)
+def _reset_frank2d_backend():
+    """
+    Clear the committed backend before and after every test so test order never
+    leaks a CPU/GPU choice from one test into the next. No-op if the installed
+    frank2d has no reset_backend yet.
+    """
+    import frank2d
+    reset = getattr(frank2d, "reset_backend", lambda: None)
+    reset()
+    yield
+    reset()
 
 # =============================================================================
 # SYNTHETIC DATA GENERATION
@@ -117,19 +167,21 @@ def add_vis_noise(vis, weights, seed=None):
     vis_noisy : array
         Visibilities with added noise.
     """
-    if seed is not None:
-        np.random.seed(seed)
+    rng = np.random.default_rng(seed)
+
+    vis = np.asarray(vis)
+    weights = np.asarray(weights)
+
+    sigma = np.zeros_like(weights, dtype=float)
+    good = weights > 0
+    sigma[good] = weights[good] ** -0.5
 
     dim0 = 2 if np.iscomplexobj(vis) else 1
-    vis = np.array(vis)
-    
-    # Noise scaled by sigma (weights**-0.5)
-    noise = np.random.standard_normal((dim0,) + vis.shape)
-    noise *= weights ** -0.5
+    noise = rng.standard_normal((dim0,) + vis.shape) * sigma
 
     vis_noisy = vis + noise[0]
     if np.iscomplexobj(vis):
-        vis_noisy += 1j * noise[1]
+        vis_noisy = vis_noisy + 1j * noise[1]
 
     return vis_noisy
 
@@ -158,27 +210,18 @@ def apply_radial_dropout(weights_1d, N, protection_radius=0.3, dropout_prob=0.4,
     ndarray
         Flattened weights array with applied radial dropouts.
     """
-    if seed is not None:
-        np.random.seed(seed)
+    rng = np.random.default_rng(seed)
 
-    # 1. Reshape to 2D for spatial operations
-    weights_2d = weights_1d.reshape((N, N))
-    
-    # 2. Create normalized radial coordinate system
+    weights_2d = np.array(weights_1d, dtype=float).reshape((N, N))
+
     val = np.linspace(-1, 1, N)
     X, Y = np.meshgrid(val, val)
     R = np.sqrt(X**2 + Y**2)
-    
-    # 3. Define the region eligible for dropouts
+
     outer_mask = R > protection_radius
-    
-    # 4. Generate and apply the random dropout
-    random_noise = np.random.random((N, N))
-    dropout_mask = (random_noise < dropout_prob)
-    
-    # Only zero out if it is in the outer region AND selected by the probability
+    dropout_mask = rng.random((N, N)) < dropout_prob
+
     weights_2d[outer_mask & dropout_mask] = 0.0
-    
     return weights_2d.ravel()
 
 # =============================================================================
@@ -271,73 +314,61 @@ def py_sampleImage(reference_image, dxy, udat, vdat, dRA=0., dDec=0., PA=0., ori
 # FIXTURES
 # =============================================================================
 
-DISK_PARAMETRIC_FUNCTION = disk_with_crescent
+@pytest.fixture
+def small_grid():
+    """
+    Tiny grid for tests that build the dense kernel / solver matrix explicitly.
+    N**2 = 256, so a 256x256 reference matrix is cheap. Do NOT build a full
+    Frank2D with this (it is below the Nyquist limit); use FourierTransform2D,
+    the kernels and IterativeSolverMethod directly.
+    """
+    return {"N": 20, "Rmax": 2.0}       # Rmax in arcsec
+
 
 @pytest.fixture
-def simulated_obs(N = 50, Rmax = 2.0):
+def big_grid():
+    """Realistic-ish grid for gridding and full-pipeline tests."""
+    return {"N": 50, "Rmax": 2.0}       # Rmax in arcsec
+
+
+@pytest.fixture
+def simulated_obs(big_grid):
     """
-    Fixture providing a synthetic asymmetric disc observation sampled 
-    on a perfectly UNIFORM (u, v) grid.
-    This fixture simulates the entire observation process, from image
-    generation to visibility sampling, including noise addition.
-    Parameters
-    ----------
-    N : int
-        Number of pixels for the image and the (u, v) grid.
-    Rmax : float
-        Maximum baseline length in arcseconds (defining the field of view).
+    Synthetic asymmetric-disc observation sampled on a uniform (u, v) grid.
+
+    Runs the full forward model: image -> visibilities (py_sampleImage) ->
+    radial flagging -> noise.
+
     Returns
     -------
     dict
-        A dictionary containing:
-        - 'u': Array of u coordinates (wavelength units).
-        - 'v': Array of v coordinates (wavelength units).
-        - 'vis': Complex visibilities with noise.
-        - 'weights': Weights for each visibility point.
-        - 'N_test': Grid size for the Frank2D solver.
-        - 'Rmax_test': Maximum baseline length for testing (arcsec).
+        uvtable : dict with keys 'u', 'v', 'vis', 'weights'
+        N       : grid size per side
+        Rmax    : field of view in arcseconds
     """
-    # Setup Simulation Parameters
-    pix_scale = (2 * Rmax) / N
-    image = DISK_PARAMETRIC_FUNCTION(N=N, pixel_scale_arcsec=pix_scale)
+    N, Rmax = big_grid["N"], big_grid["Rmax"]
 
-    #plt.imshow(image)
-    
-    # Generate Coordinate Grid
-    # We use the project's own logic to define the (u, v) points
-    # This ensures perfect alignment between testing and execution
+    pix_scale = (2 * Rmax) / N
+    image = disk_with_crescent(N=N, pixel_scale_arcsec=pix_scale)
+
     Rmax_rad = Rmax / rad_to_arcsec
     FT = FourierTransform2D(Rmax_rad, N)
     u, v = FT.uv_points
     dxy_rad = FT.dx
 
-    # Sample Visibilities
-    # The py_sampleImage function (Strategy) calculates V(u,v) from I(x,y)
     vis_clean = py_sampleImage(image, dxy_rad, u, v)
-    
-    # Add Noise & Weights
+
     weights = np.ones_like(u)
     weights = apply_radial_dropout(
-        weights, 
-        N, 
-        protection_radius=0.50, # 25% inner core protected
-        dropout_prob=0.5,       # 50% chance of flagging in outskirts
-        seed=46
+        weights, N,
+        protection_radius=0.50,
+        dropout_prob=0.5,
+        seed=46,
     )
     vis_noisy = add_vis_noise(vis_clean, weights, seed=46)
 
-    #plt.imshow(np.log(np.abs(vis_noisy.reshape(N, N))))
-
-    uvtable = {
-        'u': u,
-        'v': v,
-        'vis': vis_noisy,
-        'weights': weights
-    }
-    
-    # Package for Frank2D
     return {
-        'uvtable': uvtable,
-        'N': N,
-        'Rmax': Rmax
+        "uvtable": {"u": u, "v": v, "vis": vis_noisy, "weights": weights},
+        "N": N,
+        "Rmax": Rmax,
     }
