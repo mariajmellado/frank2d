@@ -2,10 +2,11 @@ Scripts/
 Results/
 Research/
 
+Research/
+
 __pycache__/
 .ipynb_checkpoints/
 .pytest_cache/
 .ipynb_checkpoints/
 *.egg-info/
-
 .DS_Store
