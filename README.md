@@ -71,7 +71,7 @@ pip install pytest nbmake
 ### 2. How to run?
 Execute these commands from the root directory of the project:
 
-Run the full suite (Scripts + Notebooks):
+Run the full suite
 ```bash
 pytest --nbmake Testing/ -v
 ```

@@ -327,23 +327,27 @@ class Frank2D(object):
         None
         """
         if not self._set_gridded_data:
-            try:
-                u = data["u"]
-                v = data["v"]
-                Vis = data["vis"]
-                Weights = data["weights"]
-            except KeyError:
-                self.show.error("data dictionary must contain 'u', 'v', 'vis' and 'weights' keys.")
-            
-            if not self._dev_mode:
-                self.check_bounds(u, v)
+            if data is None:
+                self.show.error("Gridded data is not set, u, v, Vis and Weights must be provided.")
+            else:
+                self.show.info("===>  Gridding visibility data...")
+                try:
+                    u = data["u"]
+                    v = data["v"]
+                    Vis = data["vis"]
+                    Weights = data["weights"]
+                except KeyError:
+                    self.show.error("data dictionary must contain 'u', 'v', 'vis' and 'weights' keys.")
+                
+                if not self._dev_mode:
+                    self.check_bounds(u, v)
 
-            grid = Gridding(self._Rmax, self._FT, verbose = verbose)
+                grid = Gridding(self._Rmax, self._FT, verbose = verbose)
 
-            u_gridded, v_gridded, vis_gridded, weights_gridded = grid.run(u, v, Vis, Weights,
-                                                                          hermitian = hermitian)
-                                                                
-            self.set_gridded_data(u_gridded, v_gridded, vis_gridded, weights_gridded)
+                u_gridded, v_gridded, vis_gridded, weights_gridded = grid.run(u, v, Vis, Weights,
+                                                                            hermitian = hermitian)
+                                                                    
+                self.set_gridded_data(u_gridded, v_gridded, vis_gridded, weights_gridded)
         else:
             self.show.info("Using existing gridded data...")
         
@@ -485,8 +489,6 @@ class Frank2D(object):
             Whether to run the fit from scratch (resetting all previous settings),
             i.e., running from after gridding.
         """
-        if not data:
-            self.show.error("If gridded data is not set, u, v, Vis and Weights must be provided.")
 
         self.process_vis(data, hermitian = hermitian, verbose = self._verbose)
 

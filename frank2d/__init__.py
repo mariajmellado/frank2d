@@ -117,7 +117,7 @@ def _commit(use_gpu):
 
     if use_gpu is None:
         if _committed is None:
-            _committed = "gpu" if HAS_GPU else "cpu"
+            _committed = "cpu"
         return _module_for(_committed)
 
     want = "gpu" if use_gpu else "cpu"

@@ -104,7 +104,6 @@ class Frank2D(object):
                 f"a factor of 5 is recommended (N >= {N_recommended}).")
             self.show.warning(msg)
 
-
     def check_bounds(self, u, v):
             """
             Function to check if the frequencies are within the bounds of the
@@ -148,8 +147,6 @@ class Frank2D(object):
                                 " Or if you'd like to fit to shorter maximum baseline,"
                                 " cut the (u, v) distribution before fitting"
                                 " ".format(Qmax_grid, Qmax_data))
-
-
 
     def set_kernel( self, kernel_type = 'wend', 
                     kernel_params = {'m': -2, 'c': 1e8, 'l': 5e4}
@@ -331,23 +328,27 @@ class Frank2D(object):
         None
         """
         if not self._set_gridded_data:
-            try:
-                u = cp.asarray(data["u"])
-                v = cp.asarray(data["v"])
-                Vis = cp.asarray(data["vis"])
-                Weights = cp.asarray(data["weights"])
-            except KeyError:
-                self.show.error("data dictionary must contain 'u', 'v', 'vis' and 'weights' keys.")
-            # corroborate that they are cupy arrays.
-   
-            if not self._dev_mode:
-                self.check_bounds(u, v)
+            if data is None:
+                self.show.error("Gridded data is not set, u, v, Vis and Weights must be provided.")
+            else:
+                self.show.info("===>  Gridding visibility data...")
+                try:
+                    u = cp.asarray(data["u"])
+                    v = cp.asarray(data["v"])
+                    Vis = cp.asarray(data["vis"])
+                    Weights = cp.asarray(data["weights"])
+                except KeyError:
+                    self.show.error("data dictionary must contain 'u', 'v', 'vis' and 'weights' keys.")
+                # corroborate that they are cupy arrays.
+    
+                if not self._dev_mode:
+                    self.check_bounds(u, v)
 
-            grid = Gridding(self._Rmax, self._FT, verbose = verbose)
-            u_gridded, v_gridded, vis_gridded, weights_gridded = grid.run(u, v, Vis, Weights,
-                                                                          hermitian = hermitian)
-            # grid.run may return numpy arrays; convert to cupy
-            self.set_gridded_data(u_gridded, v_gridded, vis_gridded, weights_gridded)
+                grid = Gridding(self._Rmax, self._FT, verbose = verbose)
+                u_gridded, v_gridded, vis_gridded, weights_gridded = grid.run(u, v, Vis, Weights,
+                                                                            hermitian = hermitian)
+                # grid.run may return numpy arrays; convert to cupy
+                self.set_gridded_data(u_gridded, v_gridded, vis_gridded, weights_gridded)
         else:
             self.show.info("Using existing gridded data...")
         
@@ -489,10 +490,7 @@ class Frank2D(object):
             Whether to run the fit from scratch (resetting all previous settings),
             i.e., running from after gridding.
         """
-
-        if not data:
-            self.show.error("If gridded data is not set, u, v, Vis and Weights must be provided.")
-
+        
         self.process_vis(data, hermitian = hermitian, verbose = self._verbose)
 
         if run_from_scratch:

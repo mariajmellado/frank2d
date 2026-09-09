@@ -322,13 +322,13 @@ def small_grid():
     Frank2D with this (it is below the Nyquist limit); use FourierTransform2D,
     the kernels and IterativeSolverMethod directly.
     """
-    return {"N": 16, "Rmax": 1.0}       # Rmax in arcsec
+    return {"N": 20, "Rmax": 2.0}       # Rmax in arcsec
 
 
 @pytest.fixture
 def big_grid():
     """Realistic-ish grid for gridding and full-pipeline tests."""
-    return {"N": 50, "Rmax": 1.0}       # Rmax in arcsec
+    return {"N": 50, "Rmax": 2.0}       # Rmax in arcsec
 
 
 @pytest.fixture
